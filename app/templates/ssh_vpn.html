@@ -1,0 +1,316 @@
+{% extends "base.html" %}
+
+{% block title %}SSH/VPN{% endblock %}
+
+{% block content %}
+<!-- ========== SSH AUTH SECTION ========== -->
+<h3>Autenticacion SSH Real</h3>
+<p style="color: #7f8c8d; font-size: 0.9em; margin: -10px 0 15px 0;">Logins SSH reales desde /var/log/auth.log (autenticaciones exitosas y fallidas)</p>
+
+<!-- SSH Auth Stats Cards -->
+<div class="stats-grid-4">
+    <div class="stat-card success">
+        <div class="number" id="statSshAccepted">-</div>
+        <div class="label">Logins Exitosos</div>
+    </div>
+    <div class="stat-card" style="border-left-color: #e74c3c;">
+        <div class="number" id="statSshFailed">-</div>
+        <div class="label">Logins Fallidos</div>
+    </div>
+    <div class="stat-card" style="border-left-color: #9b59b6;">
+        <div class="number" id="statSshScanners">-</div>
+        <div class="label">Scanners/Bots</div>
+    </div>
+    <div class="stat-card info">
+        <div class="number" id="statSshTotal">-</div>
+        <div class="label">Total Intentos</div>
+    </div>
+</div>
+
+<!-- SSH Auth IPs and Recent -->
+<div class="charts-row">
+    <div class="top-ips-card">
+        <h2 style="color: #27ae60;">IPs con Login Exitoso</h2>
+        <div id="topSshIpsAccepted">
+            <div class="loading">Cargando...</div>
+        </div>
+    </div>
+    <div class="top-ips-card">
+        <h2 style="color: #e74c3c;">IPs con Intentos Fallidos</h2>
+        <div id="topSshIpsFailed">
+            <div class="loading">Cargando...</div>
+        </div>
+    </div>
+</div>
+
+<!-- SSH Auth Users -->
+<div class="charts-row">
+    <div class="top-ips-card">
+        <h2 style="color: #27ae60;">Usuarios con Login Exitoso</h2>
+        <div id="topSshUsersAccepted">
+            <div class="loading">Cargando...</div>
+        </div>
+    </div>
+    <div class="top-ips-card">
+        <h2 style="color: #e74c3c;">Usuarios Atacados (Fallidos)</h2>
+        <div id="topSshUsersFailed">
+            <div class="loading">Cargando...</div>
+        </div>
+    </div>
+</div>
+
+<!-- ========== SSH EVENTS TABLE ========== -->
+<div class="section-divider"></div>
+
+<h3>Registro de Eventos SSH</h3>
+
+<div class="table-container" style="border-radius: 12px;">
+    <div class="table-filters">
+        <label>Tipo:</label>
+        <select id="filterSshType" onchange="applyTableFilters()">
+            <option value="">Todos</option>
+            <option value="accepted">Exitoso</option>
+            <option value="failed">Fallido</option>
+            <option value="invalid_user">Usuario Invalido</option>
+            <option value="preauth_close">Scanner</option>
+            <option value="banner_error">Bot</option>
+        </select>
+        <label style="margin-left:15px">Usuario:</label>
+        <select id="filterSshUser" onchange="applyTableFilters()">
+            <option value="">Todos</option>
+        </select>
+        <label style="margin-left:15px">IP:</label>
+        <input type="text" id="filterSshIpInput" placeholder="Filtrar por IP..." style="padding: 6px 10px; font-size: 0.85em; background: #1a1a2e; border: 1px solid #333; border-radius: 6px; color: #eee; width: 140px;">
+        <button onclick="loadSshAuthEvents()" style="margin-left:8px;padding:6px 12px;background:#4a5568;color:#fff;border:none;border-radius:4px;cursor:pointer">Buscar</button>
+        <span class="filter-count" id="sshCount"></span>
+    </div>
+    <div class="pagination-controls" id="sshPagination" style="margin-bottom:10px"></div>
+    <table>
+        <thead>
+            <tr>
+                <th class="sortable" data-field="timestamp" data-type="date">Fecha</th>
+                <th class="sortable" data-field="event_type" data-type="string">Tipo</th>
+                <th class="sortable" data-field="username" data-type="string">Usuario</th>
+                <th class="sortable" data-field="src_ip" data-type="string">IP Origen</th>
+                <th class="sortable" data-field="auth_method" data-type="string">Metodo</th>
+                <th>Pais</th>
+            </tr>
+        </thead>
+        <tbody id="sshTableBody">
+            <tr><td colspan="6" class="loading">Cargando...</td></tr>
+        </tbody>
+    </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let tableData = [];
+    let paginationState = { page: 1, totalPages: 1, totalRecords: 0 };
+    let sortState = { field: 'timestamp', direction: 'desc' };
+
+    function getSshEventBadge(eventType) {
+        const badges = {
+            'accepted': { cls: 'badge-allow', label: 'EXITOSO' },
+            'failed': { cls: 'badge-block', label: 'FALLIDO' },
+            'invalid_user': { cls: 'badge-block', label: 'INVALIDO' },
+            'preauth_close': { cls: 'badge-audit', label: 'SCANNER' },
+            'banner_error': { cls: 'badge-audit', label: 'BOT' }
+        };
+        const b = badges[eventType] || { cls: 'badge-audit', label: eventType };
+        return `<span class="badge ${b.cls}">${b.label}</span>`;
+    }
+
+    function sortData(data, field, direction, type) {
+        return [...data].sort((a, b) => {
+            let valA = a[field], valB = b[field];
+            if (type === 'date') { valA = new Date(valA).getTime(); valB = new Date(valB).getTime(); }
+            else if (type === 'number') { valA = parseInt(valA) || 0; valB = parseInt(valB) || 0; }
+            else { valA = (valA || '').toString().toLowerCase(); valB = (valB || '').toString().toLowerCase(); }
+            if (valA < valB) return direction === 'asc' ? -1 : 1;
+            if (valA > valB) return direction === 'asc' ? 1 : -1;
+            return 0;
+        });
+    }
+
+    function handleSort(th) {
+        const field = th.dataset.field;
+        const type = th.dataset.type;
+        if (sortState.field === field) {
+            sortState.direction = sortState.direction === 'asc' ? 'desc' : 'asc';
+        } else {
+            sortState.field = field;
+            sortState.direction = 'desc';
+        }
+        document.querySelectorAll('th.sortable').forEach(h => h.classList.remove('asc', 'desc'));
+        th.classList.add(sortState.direction);
+        applyTableFilters();
+    }
+
+    function renderPagination(pagination) {
+        const container = document.getElementById('sshPagination');
+        if (!pagination || pagination.totalPages <= 1) {
+            container.innerHTML = '';
+            return;
+        }
+
+        const { page, totalPages, totalRecords } = pagination;
+        let html = '<div style="display:flex;align-items:center;gap:10px">';
+        html += `<span style="color:#888">Pagina ${page} de ${totalPages} (${totalRecords} registros)</span>`;
+        html += `<button onclick="changePage(${page - 1})" ${page <= 1 ? 'disabled' : ''} style="padding:4px 8px;background:#4a5568;color:#fff;border:none;border-radius:4px;cursor:pointer">Anterior</button>`;
+        html += `<button onclick="changePage(${page + 1})" ${page >= totalPages ? 'disabled' : ''} style="padding:4px 8px;background:#4a5568;color:#fff;border:none;border-radius:4px;cursor:pointer">Siguiente</button>`;
+        html += '</div>';
+        container.innerHTML = html;
+    }
+
+    function changePage(newPage) {
+        paginationState.page = newPage;
+        loadSshAuthEvents();
+    }
+
+    function applyTableFilters() {
+        let data = [...tableData];
+        const eventType = document.getElementById('filterSshType').value;
+        const user = document.getElementById('filterSshUser').value;
+
+        if (eventType) data = data.filter(r => r.event_type === eventType);
+        if (user) data = data.filter(r => r.username === user);
+
+        const th = document.querySelector(`th[data-field="${sortState.field}"]`);
+        const type = th ? th.dataset.type : 'string';
+        data = sortData(data, sortState.field, sortState.direction, type);
+
+        renderTable(data);
+        document.getElementById('sshCount').textContent = `${data.length} registros`;
+    }
+
+    async function renderTable(data) {
+        const tbody = document.getElementById('sshTableBody');
+        if (data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="empty">No hay eventos SSH</td></tr>';
+            return;
+        }
+        const ips = data.map(r => r.src_ip).filter(ip => ip);
+        await getGeoInfoBatch(ips);
+        tbody.innerHTML = data.map(r => {
+            const geo = geoCache[r.src_ip] || { flag: '', country: '' };
+            return `
+                <tr>
+                    <td class="mono">${formatDate(r.timestamp)}</td>
+                    <td>${getSshEventBadge(r.event_type)}</td>
+                    <td>${r.username || '<span style="color:#666">-</span>'}</td>
+                    <td class="mono">${r.src_ip || '-'}</td>
+                    <td>${r.auth_method || '<span style="color:#666">-</span>'}</td>
+                    <td>${geo.flag} ${geo.country}</td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    async function loadSshAuthStats() {
+        const f = getFilters();
+        const params = new URLSearchParams({ hours: f.hours });
+
+        try {
+            const res = await apiFetch(`${basePath}/api/ssh-auth-stats?${params}`);
+            const data = await res.json();
+
+            document.getElementById('statSshAccepted').textContent = formatNumber(data.totals.accepted || 0);
+            document.getElementById('statSshFailed').textContent = formatNumber(data.totals.failed || 0);
+            document.getElementById('statSshScanners').textContent = formatNumber(data.totals.scanners || 0);
+            document.getElementById('statSshTotal').textContent = formatNumber(
+                (data.totals.accepted || 0) + (data.totals.failed || 0) + (data.totals.scanners || 0)
+            );
+
+            // Top IPs with successful login
+            if (data.top_ips_accepted && data.top_ips_accepted.length > 0) {
+                const ips = data.top_ips_accepted.map(item => item.ip);
+                await getGeoInfoBatch(ips);
+                document.getElementById('topSshIpsAccepted').innerHTML = data.top_ips_accepted.map(item => {
+                    const geo = geoCache[item.ip] || { flag: '', country: '' };
+                    const timeStr = item.last_seen ? `<span class="ip-time">${formatTime(item.last_seen)}</span>` : '';
+                    return `<div class="ip-row"><div class="ip-info"><span class="ip-flag">${geo.flag}</span><div><div class="ip-address">${item.ip}</div><div class="ip-country">${geo.country}${timeStr}</div></div></div><span class="ip-count" style="background: linear-gradient(135deg, #27ae60, #1e8449);">${item.count}</span></div>`;
+                }).join('');
+            } else {
+                document.getElementById('topSshIpsAccepted').innerHTML = '<div class="empty">Sin logins exitosos</div>';
+            }
+
+            // Top IPs with failed attempts
+            if (data.top_ips_failed && data.top_ips_failed.length > 0) {
+                const ips = data.top_ips_failed.map(item => item.ip);
+                await getGeoInfoBatch(ips);
+                document.getElementById('topSshIpsFailed').innerHTML = data.top_ips_failed.map(item => {
+                    const geo = geoCache[item.ip] || { flag: '', country: '' };
+                    const timeStr = item.last_seen ? `<span class="ip-time">${formatTime(item.last_seen)}</span>` : '';
+                    return `<div class="ip-row"><div class="ip-info"><span class="ip-flag">${geo.flag}</span><div><div class="ip-address">${item.ip}</div><div class="ip-country">${geo.country}${timeStr}</div></div></div><span class="ip-count" style="background: linear-gradient(135deg, #e74c3c, #c0392b);">${item.count}</span></div>`;
+                }).join('');
+            } else {
+                document.getElementById('topSshIpsFailed').innerHTML = '<div class="empty">Sin intentos fallidos</div>';
+            }
+
+            // Top users with successful login
+            if (data.top_users_accepted && data.top_users_accepted.length > 0) {
+                document.getElementById('topSshUsersAccepted').innerHTML = data.top_users_accepted.map(item => `
+                    <div class="ip-row"><div class="ip-info"><span class="ip-flag">👤</span><div><div class="ip-address">${item.username}</div></div></div><span class="ip-count" style="background: linear-gradient(135deg, #27ae60, #1e8449);">${item.count}</span></div>
+                `).join('');
+            } else {
+                document.getElementById('topSshUsersAccepted').innerHTML = '<div class="empty">Sin usuarios</div>';
+            }
+
+            // Top users attacked
+            if (data.top_users_failed && data.top_users_failed.length > 0) {
+                document.getElementById('topSshUsersFailed').innerHTML = data.top_users_failed.map(item => `
+                    <div class="ip-row"><div class="ip-info"><span class="ip-flag">👤</span><div><div class="ip-address">${item.username}</div></div></div><span class="ip-count" style="background: linear-gradient(135deg, #e74c3c, #c0392b);">${item.count}</span></div>
+                `).join('');
+            } else {
+                document.getElementById('topSshUsersFailed').innerHTML = '<div class="empty">Sin usuarios atacados</div>';
+            }
+
+        } catch (e) {
+            console.error('Error loading SSH auth stats:', e);
+        }
+    }
+
+    async function loadSshAuthEvents() {
+        const f = getFilters();
+        const page = paginationState.page;
+        const ipFilter = document.getElementById('filterSshIpInput').value.trim();
+        const params = new URLSearchParams({ hours: f.hours, limit: 100, page: page, ip: ipFilter });
+
+        try {
+            const res = await apiFetch(`${basePath}/api/ssh-auth-events?${params}`);
+            const response = await res.json();
+            tableData = response.data || [];
+            paginationState = {
+                page: response.pagination.page,
+                totalPages: response.pagination.total_pages,
+                totalRecords: response.pagination.total_records
+            };
+
+            // Populate user filter
+            const users = [...new Set(tableData.map(r => r.username).filter(u => u))].sort();
+            document.getElementById('filterSshUser').innerHTML = '<option value="">Todos</option>' + users.map(u => `<option value="${u}">${u}</option>`).join('');
+
+            renderPagination(paginationState);
+            applyTableFilters();
+        } catch (e) {
+            console.error('Error loading SSH auth events:', e);
+        }
+    }
+
+    async function loadPageData() {
+        await Promise.all([
+            loadSshAuthStats(),
+            loadSshAuthEvents()
+        ]);
+    }
+
+    function initPage() {
+        document.querySelectorAll('th.sortable').forEach(th => {
+            th.addEventListener('click', () => handleSort(th));
+        });
+        const th = document.querySelector(`th[data-field="${sortState.field}"]`);
+        if (th) th.classList.add(sortState.direction);
+    }
+</script>
+{% endblock %}

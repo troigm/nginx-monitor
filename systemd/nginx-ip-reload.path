@@ -1,0 +1,13 @@
+# Systemd path unit to watch ip_access.conf changes
+# Install: sudo cp nginx-ip-reload.* /etc/systemd/system/ && sudo systemctl enable --now nginx-ip-reload.path
+
+[Unit]
+Description=Watch Nginx IP Access Config for changes
+Documentation=https://github.com/your-repo/nginx-monitor
+
+[Path]
+PathModified=/etc/nginx/conf.d/ip_access.conf
+Unit=nginx-ip-reload.service
+
+[Install]
+WantedBy=multi-user.target

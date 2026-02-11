@@ -1,0 +1,691 @@
+{% extends "base.html" %}
+
+{% block title %}Nginx{% endblock %}
+
+{% block filters %}
+<div class="filter-group">
+    <label>Site</label>
+    <select id="filterSite">
+        <option value="">Todos los sites</option>
+        {% for site in monitor_sites %}
+        <option value="{{ site }}">{{ site }}</option>
+        {% endfor %}
+    </select>
+</div>
+<div class="filter-group">
+    <label>Aplicacion</label>
+    <select id="filterApp">
+        <option value="">Todas</option>
+        {% for app in monitor_apps %}
+        <option value="{{ app.slug }}">{{ app.label }}</option>
+        {% endfor %}
+    </select>
+</div>
+<div class="filter-group">
+    <label>Periodo</label>
+    <select id="filterHours">
+        <option value="1">Ultima hora</option>
+        <option value="6">Ultimas 6 horas</option>
+        <option value="24" selected>Ultimas 24 horas</option>
+        <option value="72">Ultimos 3 dias</option>
+        <option value="168">Ultima semana</option>
+        <option value="720">Ultimo mes</option>
+        <option value="2160">Ultimos 3 meses</option>
+    </select>
+</div>
+{% endblock %}
+
+{% block content %}
+<!-- Stats Cards -->
+<div class="stats-grid">
+    <div class="stat-card success">
+        <div class="number" id="statVisits">-</div>
+        <div class="label">Visitas</div>
+    </div>
+    <div class="stat-card info">
+        <div class="number" id="statUniqueIps">-</div>
+        <div class="label">IPs Unicas</div>
+    </div>
+    <div class="stat-card warning">
+        <div class="number" id="statCsp">-</div>
+        <div class="label">Violaciones CSP</div>
+    </div>
+    <div class="stat-card danger">
+        <div class="number" id="statRateLimit">-</div>
+        <div class="label">Rate Limit</div>
+    </div>
+    <div class="stat-card danger">
+        <div class="number" id="statBadBots">-</div>
+        <div class="label">Bad Bots (444)</div>
+    </div>
+    <div class="stat-card">
+        <div class="number" id="statErrors">-</div>
+        <div class="label">Errores HTTP</div>
+    </div>
+</div>
+
+<!-- Charts Row 1: Timeline + By Site -->
+<div class="charts-grid">
+    <div class="chart-card">
+        <h2>Visitas por Hora</h2>
+        <div class="chart-container">
+            <canvas id="chartTimeline"></canvas>
+        </div>
+    </div>
+    <div class="chart-card">
+        <h2>Visitas por Site</h2>
+        <div class="chart-container">
+            <canvas id="chartBySite"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- Charts Row 2: By App + Top IPs -->
+<div class="charts-row">
+    <div class="chart-card">
+        <h2>Visitas por Aplicacion</h2>
+        <div class="chart-container">
+            <canvas id="chartByApp"></canvas>
+        </div>
+    </div>
+    <div class="top-ips-card">
+        <h2>Top IPs Bloqueadas (Nginx)</h2>
+        <div id="topIps">
+            <div class="loading">Cargando...</div>
+        </div>
+    </div>
+</div>
+
+<!-- ========== FAIL2BAN SECTION ========== -->
+<h3>Fail2Ban - Bloqueo Automatico de IPs</h3>
+
+<!-- Fail2ban Stats Cards -->
+<div class="stats-grid-4">
+    <div class="stat-card danger">
+        <div class="number" id="statF2bBans">-</div>
+        <div class="label">IPs Baneadas</div>
+    </div>
+    <div class="stat-card warning">
+        <div class="number" id="statF2bFounds">-</div>
+        <div class="label">Intentos Detectados</div>
+    </div>
+    <div class="stat-card info">
+        <div class="number" id="statF2bLimitReq">-</div>
+        <div class="label">Bans Rate Limit</div>
+    </div>
+    <div class="stat-card">
+        <div class="number" id="statF2bBadBots">-</div>
+        <div class="label">Bans Bad Bots</div>
+    </div>
+</div>
+
+<!-- Fail2ban Charts -->
+<div class="charts-row">
+    <div class="chart-card">
+        <h2>Bans por Jail</h2>
+        <div class="chart-container">
+            <canvas id="chartF2bByJail"></canvas>
+        </div>
+    </div>
+    <div class="chart-card">
+        <h2>Actividad Fail2Ban por Hora</h2>
+        <div class="chart-container">
+            <canvas id="chartF2bTimeline"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- Fail2ban Top IPs -->
+<div class="charts-row">
+    <div class="top-ips-card">
+        <h2>Top IPs Baneadas (Fail2Ban)</h2>
+        <div id="topF2bBanned">
+            <div class="loading">Cargando...</div>
+        </div>
+    </div>
+    <div class="top-ips-card">
+        <h2>Top IPs por Intentos</h2>
+        <div id="topF2bFounds">
+            <div class="loading">Cargando...</div>
+        </div>
+    </div>
+</div>
+
+<!-- ========== TABS SECTION ========== -->
+<div class="section-divider"></div>
+
+<!-- Tabs -->
+<div class="tabs">
+    <button class="tab active" onclick="showTab('csp')">CSP Reports</button>
+    <button class="tab" onclick="showTab('nginx')">Nginx Logs</button>
+    <button class="tab" onclick="showTab('fail2ban')">Fail2Ban Events</button>
+</div>
+
+<!-- CSP Table -->
+<div id="tabCsp" class="table-container">
+    <div class="table-filters">
+        <label>Site:</label>
+        <select id="filterCspSite" onchange="applyTableFilters('csp')">
+            <option value="">Todos</option>
+        </select>
+        <label style="margin-left:15px">Directiva:</label>
+        <select id="filterCspDirective" onchange="applyTableFilters('csp')">
+            <option value="">Todas</option>
+        </select>
+        <span class="filter-count" id="cspCount"></span>
+    </div>
+    <div class="pagination-controls" id="cspPagination" style="margin-bottom:10px"></div>
+    <table>
+        <thead>
+            <tr>
+                <th class="sortable" data-table="csp" data-field="timestamp" data-type="date">Fecha</th>
+                <th class="sortable" data-table="csp" data-field="site" data-type="string">Site</th>
+                <th class="sortable" data-table="csp" data-field="app" data-type="string">App</th>
+                <th class="sortable" data-table="csp" data-field="violated_directive" data-type="string">Directiva Violada</th>
+                <th>URI Bloqueada</th>
+                <th>Documento</th>
+            </tr>
+        </thead>
+        <tbody id="cspTableBody">
+            <tr><td colspan="6" class="loading">Cargando...</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<!-- Nginx Logs Table -->
+<div id="tabNginx" class="table-container" style="display:none;">
+    <div class="table-filters">
+        <label>Tipo:</label>
+        <select id="filterNginxType" onchange="applyTableFilters('nginx')">
+            <option value="">Todos</option>
+        </select>
+        <label style="margin-left:15px">Status:</label>
+        <select id="filterNginxStatus" onchange="applyTableFilters('nginx')">
+            <option value="">Todos</option>
+        </select>
+        <label style="margin-left:15px">IP:</label>
+        <input type="text" id="filterNginxIp" placeholder="Filtrar por IP" style="padding:4px 8px;border:1px solid #444;background:#1a1a2e;color:#ddd;border-radius:4px">
+        <button onclick="loadNginxLogs()" style="margin-left:8px;padding:4px 12px;background:#4a5568;color:#fff;border:none;border-radius:4px;cursor:pointer">Buscar</button>
+        <span class="filter-count" id="nginxCount"></span>
+    </div>
+    <div class="pagination-controls" id="nginxPagination" style="margin-bottom:10px"></div>
+    <table>
+        <thead>
+            <tr>
+                <th class="sortable" data-table="nginx" data-field="timestamp" data-type="date">Fecha</th>
+                <th class="sortable" data-table="nginx" data-field="site" data-type="string">Site</th>
+                <th class="sortable" data-table="nginx" data-field="app" data-type="string">App</th>
+                <th class="sortable" data-table="nginx" data-field="log_type" data-type="string">Tipo</th>
+                <th class="sortable" data-table="nginx" data-field="client_ip" data-type="string">IP</th>
+                <th>URI</th>
+                <th class="sortable" data-table="nginx" data-field="status_code" data-type="number">Status</th>
+                <th class="sortable" data-table="nginx" data-field="user_agent" data-type="string">User Agent</th>
+            </tr>
+        </thead>
+        <tbody id="nginxTableBody">
+            <tr><td colspan="8" class="loading">Cargando...</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<!-- Fail2Ban Events Table -->
+<div id="tabFail2ban" class="table-container" style="display:none;">
+    <div class="table-filters">
+        <label>Jail:</label>
+        <select id="filterF2bJail" onchange="applyTableFilters('fail2ban')">
+            <option value="">Todas</option>
+        </select>
+        <label style="margin-left:15px">Evento:</label>
+        <select id="filterF2bEvent" onchange="applyTableFilters('fail2ban')">
+            <option value="">Todos</option>
+            <option value="found">Found</option>
+            <option value="ban">Ban</option>
+            <option value="unban">Unban</option>
+        </select>
+        <label style="margin-left:15px">IP:</label>
+        <input type="text" id="filterF2bIp" placeholder="Filtrar por IP" style="padding:4px 8px;border:1px solid #444;background:#1a1a2e;color:#ddd;border-radius:4px">
+        <button onclick="loadFail2banEvents()" style="margin-left:8px;padding:4px 12px;background:#4a5568;color:#fff;border:none;border-radius:4px;cursor:pointer">Buscar</button>
+        <span class="filter-count" id="fail2banCount"></span>
+    </div>
+    <div class="pagination-controls" id="fail2banPagination" style="margin-bottom:10px"></div>
+    <table>
+        <thead>
+            <tr>
+                <th class="sortable" data-table="fail2ban" data-field="timestamp" data-type="date">Fecha</th>
+                <th class="sortable" data-table="fail2ban" data-field="jail" data-type="string">Jail</th>
+                <th class="sortable" data-table="fail2ban" data-field="event_type" data-type="string">Evento</th>
+                <th class="sortable" data-table="fail2ban" data-field="ip" data-type="string">IP</th>
+                <th>Pais</th>
+            </tr>
+        </thead>
+        <tbody id="fail2banTableBody">
+            <tr><td colspan="5" class="loading">Cargando...</td></tr>
+        </tbody>
+    </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let currentTab = 'csp';
+    const tableData = { csp: [], nginx: [], fail2ban: [] };
+    const paginationState = {
+        csp: { page: 1, totalPages: 1, totalRecords: 0 },
+        nginx: { page: 1, totalPages: 1, totalRecords: 0 },
+        fail2ban: { page: 1, totalPages: 1, totalRecords: 0 }
+    };
+    const sortState = {
+        csp: { field: 'timestamp', direction: 'desc' },
+        nginx: { field: 'timestamp', direction: 'desc' },
+        fail2ban: { field: 'timestamp', direction: 'desc' }
+    };
+
+    function showTab(tab) {
+        currentTab = tab;
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelector(`.tab[onclick="showTab('${tab}')"]`).classList.add('active');
+        document.getElementById('tabCsp').style.display = tab === 'csp' ? 'block' : 'none';
+        document.getElementById('tabNginx').style.display = tab === 'nginx' ? 'block' : 'none';
+        document.getElementById('tabFail2ban').style.display = tab === 'fail2ban' ? 'block' : 'none';
+    }
+
+    function sortData(data, field, direction, type) {
+        return [...data].sort((a, b) => {
+            let valA = a[field], valB = b[field];
+            if (type === 'date') { valA = new Date(valA).getTime(); valB = new Date(valB).getTime(); }
+            else if (type === 'number') { valA = parseInt(valA) || 0; valB = parseInt(valB) || 0; }
+            else { valA = (valA || '').toString().toLowerCase(); valB = (valB || '').toString().toLowerCase(); }
+            if (valA < valB) return direction === 'asc' ? -1 : 1;
+            if (valA > valB) return direction === 'asc' ? 1 : -1;
+            return 0;
+        });
+    }
+
+    function handleSort(th) {
+        const table = th.dataset.table;
+        const field = th.dataset.field;
+        const type = th.dataset.type;
+        const currentState = sortState[table];
+        if (currentState.field === field) {
+            currentState.direction = currentState.direction === 'asc' ? 'desc' : 'asc';
+        } else {
+            currentState.field = field;
+            currentState.direction = 'desc';
+        }
+        document.querySelectorAll(`th[data-table="${table}"]`).forEach(h => h.classList.remove('asc', 'desc'));
+        th.classList.add(currentState.direction);
+        applyTableFilters(table);
+    }
+
+    function applyTableFilters(table) {
+        let data = [...tableData[table]];
+        const state = sortState[table];
+        const th = document.querySelector(`th[data-table="${table}"][data-field="${state.field}"]`);
+        const type = th ? th.dataset.type : 'string';
+        data = sortData(data, state.field, state.direction, type);
+
+        if (table === 'csp') {
+            const site = document.getElementById('filterCspSite').value;
+            const directive = document.getElementById('filterCspDirective').value;
+            if (site) data = data.filter(r => r.site === site);
+            if (directive) data = data.filter(r => r.violated_directive === directive);
+            renderCspTable(data);
+            document.getElementById('cspCount').textContent = `${data.length} registros`;
+        } else if (table === 'nginx') {
+            const type = document.getElementById('filterNginxType').value;
+            const status = document.getElementById('filterNginxStatus').value;
+            if (type) data = data.filter(r => r.log_type === type);
+            if (status) data = data.filter(r => r.status_code == status);
+            renderNginxTable(data);
+            document.getElementById('nginxCount').textContent = `${data.length} registros`;
+        } else if (table === 'fail2ban') {
+            const jail = document.getElementById('filterF2bJail').value;
+            const event = document.getElementById('filterF2bEvent').value;
+            if (jail) data = data.filter(r => r.jail === jail);
+            if (event) data = data.filter(r => r.event_type === event);
+            renderFail2banTable(data);
+            document.getElementById('fail2banCount').textContent = `${data.length} registros`;
+        }
+    }
+
+    function renderPagination(table, pagination) {
+        const container = document.getElementById(`${table}Pagination`);
+        if (!pagination || pagination.totalPages <= 1) {
+            container.innerHTML = '';
+            return;
+        }
+
+        const { page, totalPages, totalRecords } = pagination;
+        let html = '<div style="display:flex;align-items:center;gap:10px">';
+        html += `<span style="color:#888">Pagina ${page} de ${totalPages} (${totalRecords} registros)</span>`;
+        html += `<button onclick="changePage('${table}', ${page - 1})" ${page <= 1 ? 'disabled' : ''} style="padding:4px 8px;background:#4a5568;color:#fff;border:none;border-radius:4px;cursor:pointer">Anterior</button>`;
+        html += `<button onclick="changePage('${table}', ${page + 1})" ${page >= totalPages ? 'disabled' : ''} style="padding:4px 8px;background:#4a5568;color:#fff;border:none;border-radius:4px;cursor:pointer">Siguiente</button>`;
+        html += '</div>';
+        container.innerHTML = html;
+    }
+
+    function changePage(table, newPage) {
+        paginationState[table].page = newPage;
+        if (table === 'csp') loadCspReports();
+        else if (table === 'nginx') loadNginxLogs();
+        else if (table === 'fail2ban') loadFail2banEvents();
+    }
+
+    function renderCspTable(data) {
+        const tbody = document.getElementById('cspTableBody');
+        if (data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="empty">No hay reportes CSP</td></tr>';
+            return;
+        }
+        tbody.innerHTML = data.map(r => `
+            <tr>
+                <td class="mono">${formatDate(r.timestamp)}</td>
+                <td><span class="badge badge-site">${r.site}</span></td>
+                <td>${getAppBadge(r.app)}</td>
+                <td><code>${r.violated_directive}</code></td>
+                <td class="truncate" title="${r.blocked_uri}">${r.blocked_uri}</td>
+                <td class="truncate" title="${r.document_uri}">${r.document_uri}</td>
+            </tr>
+        `).join('');
+    }
+
+    function renderNginxTable(data) {
+        const tbody = document.getElementById('nginxTableBody');
+        if (data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" class="empty">No hay logs de Nginx</td></tr>';
+            return;
+        }
+        tbody.innerHTML = data.map(r => `
+            <tr>
+                <td class="mono">${formatDate(r.timestamp)}</td>
+                <td><span class="badge badge-site">${r.site}</span></td>
+                <td>${getAppBadge(r.app)}</td>
+                <td>${getTypeBadge(r.log_type)}</td>
+                <td class="mono">${r.client_ip}</td>
+                <td class="truncate" title="${r.request_uri || ''}">${r.request_uri || '-'}</td>
+                <td>${r.status_code ? `<span class="badge badge-http_${r.status_code}">${r.status_code}</span>` : '-'}</td>
+                <td class="truncate" title="${r.user_agent || ''}">${r.user_agent || '-'}</td>
+            </tr>
+        `).join('');
+    }
+
+    async function renderFail2banTable(data) {
+        const tbody = document.getElementById('fail2banTableBody');
+        if (data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="empty">No hay eventos de Fail2Ban</td></tr>';
+            return;
+        }
+        const ips = data.map(r => r.ip);
+        await getGeoInfoBatch(ips);
+        tbody.innerHTML = data.map(r => {
+            const geo = geoCache[r.ip] || { flag: '', country: '' };
+            return `
+                <tr>
+                    <td class="mono">${formatDate(r.timestamp)}</td>
+                    <td>${getJailBadge(r.jail)}</td>
+                    <td>${getEventBadge(r.event_type)}</td>
+                    <td class="mono">${r.ip}</td>
+                    <td>${geo.flag} ${geo.country}</td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    function initCharts() {
+        const defaultOptions = {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { labels: { color: '#888' } } },
+            scales: {
+                x: { ticks: { color: '#666' }, grid: { color: '#2a2a4a' } },
+                y: { ticks: { color: '#666' }, grid: { color: '#2a2a4a' }, beginAtZero: true }
+            }
+        };
+
+        charts.timeline = new Chart(document.getElementById('chartTimeline'), {
+            type: 'line',
+            data: { labels: [], datasets: [] },
+            options: { ...defaultOptions, plugins: { ...defaultOptions.plugins, legend: { display: false } } }
+        });
+
+        charts.bySite = new Chart(document.getElementById('chartBySite'), {
+            type: 'doughnut',
+            data: { labels: [], datasets: [{ data: [], backgroundColor: [chartColors.blue, chartColors.purple] }] },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: '#888' } } } }
+        });
+
+        charts.byApp = new Chart(document.getElementById('chartByApp'), {
+            type: 'bar',
+            data: { labels: [], datasets: [{ data: [], backgroundColor: [chartColors.blue, chartColors.orange, chartColors.purple] }] },
+            options: { ...defaultOptions, plugins: { legend: { display: false } } }
+        });
+
+        charts.f2bByJail = new Chart(document.getElementById('chartF2bByJail'), {
+            type: 'doughnut',
+            data: { labels: [], datasets: [{ data: [], backgroundColor: [chartColors.red, chartColors.orange, chartColors.purple, chartColors.blue] }] },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: '#888' } } } }
+        });
+
+        charts.f2bTimeline = new Chart(document.getElementById('chartF2bTimeline'), {
+            type: 'line',
+            data: { labels: [], datasets: [] },
+            options: defaultOptions
+        });
+    }
+
+    async function loadDashboardStats() {
+        const f = getFilters();
+        const params = new URLSearchParams({ hours: f.hours, site: f.site || '', app: f.app || '' });
+        try {
+            const res = await apiFetch(`${basePath}/api/dashboard-stats?${params}`);
+            const data = await res.json();
+            document.getElementById('statVisits').textContent = formatNumber(data.visits.total);
+            document.getElementById('statUniqueIps').textContent = formatNumber(data.visits.unique_ips);
+            document.getElementById('statCsp').textContent = formatNumber(data.errors.csp);
+            document.getElementById('statRateLimit').textContent = formatNumber(data.errors.rate_limit);
+            document.getElementById('statBadBots').textContent = formatNumber(data.errors.bad_bot);
+            document.getElementById('statErrors').textContent = formatNumber(data.errors.http_4xx + data.errors.http_5xx);
+
+            if (data.top_blocked_ips && data.top_blocked_ips.length > 0) {
+                const ips = data.top_blocked_ips.map(item => item.ip);
+                await getGeoInfoBatch(ips);
+                document.getElementById('topIps').innerHTML = data.top_blocked_ips.map(item => {
+                    const geo = geoCache[item.ip] || { flag: '', country: '' };
+                    const timeStr = item.last_seen ? `<span class="ip-time">${formatTime(item.last_seen)}</span>` : '';
+                    return `<div class="ip-row"><div class="ip-info"><span class="ip-flag">${geo.flag}</span><div><div class="ip-address">${item.ip}</div><div class="ip-country">${geo.country}${timeStr}</div></div></div><div class="ip-badges">${getTypeBadge(item.type)}<span class="ip-count">${item.count}</span></div></div>`;
+                }).join('');
+            } else {
+                document.getElementById('topIps').innerHTML = '<div class="empty">Sin IPs bloqueadas</div>';
+            }
+        } catch (e) { console.error('Error loading dashboard stats:', e); }
+    }
+
+    async function loadTimeline() {
+        const f = getFilters();
+        const params = new URLSearchParams({ hours: f.hours, site: f.site || '', app: f.app || '' });
+        try {
+            const res = await apiFetch(`${basePath}/api/visits-timeline?${params}`);
+            const data = await res.json();
+            charts.timeline.data.labels = data.map(d => d.timestamp.split(' ')[1] || d.timestamp);
+            charts.timeline.data.datasets = [{
+                label: 'Visitas',
+                data: data.map(d => d.total),
+                borderColor: chartColors.blue,
+                backgroundColor: chartColors.blueFade,
+                fill: true,
+                tension: 0.3
+            }];
+            charts.timeline.update();
+
+            // Aggregate by_site and by_app across all timeline entries
+            const bySite = {};
+            const byApp = {};
+            data.forEach(d => {
+                if (d.by_site) {
+                    Object.entries(d.by_site).forEach(([site, count]) => {
+                        bySite[site] = (bySite[site] || 0) + count;
+                    });
+                }
+                if (d.by_app) {
+                    Object.entries(d.by_app).forEach(([app, count]) => {
+                        byApp[app] = (byApp[app] || 0) + count;
+                    });
+                }
+            });
+            charts.bySite.data.labels = Object.keys(bySite);
+            charts.bySite.data.datasets[0].data = Object.values(bySite);
+            charts.bySite.update();
+            charts.byApp.data.labels = Object.keys(byApp);
+            charts.byApp.data.datasets[0].data = Object.values(byApp);
+            charts.byApp.update();
+        } catch (e) { console.error('Error loading timeline:', e); }
+    }
+
+    async function loadFail2banStats() {
+        const f = getFilters();
+        const params = new URLSearchParams({ hours: f.hours });
+        try {
+            const res = await apiFetch(`${basePath}/api/fail2ban-stats?${params}`);
+            const data = await res.json();
+            document.getElementById('statF2bBans').textContent = formatNumber(data.totals.bans);
+            document.getElementById('statF2bFounds').textContent = formatNumber(data.totals.founds);
+            const limitReq = data.bans_by_jail.find(j => j.jail.includes('limit-req'))?.count || 0;
+            const badBots = data.bans_by_jail.find(j => j.jail.includes('badbots'))?.count || 0;
+            document.getElementById('statF2bLimitReq').textContent = formatNumber(limitReq);
+            document.getElementById('statF2bBadBots').textContent = formatNumber(badBots);
+
+            charts.f2bByJail.data.labels = data.bans_by_jail.map(j => j.jail);
+            charts.f2bByJail.data.datasets[0].data = data.bans_by_jail.map(j => j.count);
+            charts.f2bByJail.update();
+
+            if (data.timeline && data.timeline.length > 0) {
+                charts.f2bTimeline.data.labels = data.timeline.map(t => t.timestamp.split(' ')[1] || t.timestamp);
+                charts.f2bTimeline.data.datasets = [
+                    { label: 'Bans', data: data.timeline.map(t => t.ban || 0), borderColor: chartColors.red, backgroundColor: chartColors.redFade, fill: true },
+                    { label: 'Founds', data: data.timeline.map(t => t.found || 0), borderColor: chartColors.orange, backgroundColor: chartColors.orangeFade, fill: true }
+                ];
+                charts.f2bTimeline.update();
+            }
+
+            if (data.top_banned_ips && data.top_banned_ips.length > 0) {
+                const ips = data.top_banned_ips.map(item => item.ip);
+                await getGeoInfoBatch(ips);
+                document.getElementById('topF2bBanned').innerHTML = data.top_banned_ips.map(item => {
+                    const geo = geoCache[item.ip] || { flag: '', country: '' };
+                    const timeStr = item.last_seen ? `<span class="ip-time">${formatTime(item.last_seen)}</span>` : '';
+                    return `<div class="ip-row"><div class="ip-info"><span class="ip-flag">${geo.flag}</span><div><div class="ip-address">${item.ip}</div><div class="ip-country">${geo.country}${timeStr}</div></div></div><div class="ip-badges">${getJailBadge(item.jail)}<span class="ip-count">${item.count}</span></div></div>`;
+                }).join('');
+            } else {
+                document.getElementById('topF2bBanned').innerHTML = '<div class="empty">Sin IPs baneadas</div>';
+            }
+
+            if (data.top_found_ips && data.top_found_ips.length > 0) {
+                const ips = data.top_found_ips.map(item => item.ip);
+                await getGeoInfoBatch(ips);
+                document.getElementById('topF2bFounds').innerHTML = data.top_found_ips.map(item => {
+                    const geo = geoCache[item.ip] || { flag: '', country: '' };
+                    const timeStr = item.last_seen ? `<span class="ip-time">${formatTime(item.last_seen)}</span>` : '';
+                    return `<div class="ip-row"><div class="ip-info"><span class="ip-flag">${geo.flag}</span><div><div class="ip-address">${item.ip}</div><div class="ip-country">${geo.country}${timeStr}</div></div></div><div class="ip-badges">${getJailBadge(item.jail)}<span class="ip-count warning">${item.count}</span></div></div>`;
+                }).join('');
+            } else {
+                document.getElementById('topF2bFounds').innerHTML = '<div class="empty">Sin intentos detectados</div>';
+            }
+        } catch (e) { console.error('Error loading fail2ban stats:', e); }
+    }
+
+    async function loadCspReports() {
+        const f = getFilters();
+        const page = paginationState.csp.page;
+        const params = new URLSearchParams({ hours: f.hours, site: f.site || '', app: f.app || '', limit: 100, page: page });
+        try {
+            const res = await apiFetch(`${basePath}/api/csp-reports?${params}`);
+            const response = await res.json();
+            tableData.csp = response.data || [];
+            paginationState.csp = {
+                page: response.pagination.page,
+                totalPages: response.pagination.total_pages,
+                totalRecords: response.pagination.total_records
+            };
+            const sites = [...new Set(tableData.csp.map(r => r.site))];
+            const directives = [...new Set(tableData.csp.map(r => r.violated_directive))];
+            const siteSelect = document.getElementById('filterCspSite');
+            const dirSelect = document.getElementById('filterCspDirective');
+            siteSelect.innerHTML = '<option value="">Todos</option>' + sites.map(s => `<option value="${s}">${s}</option>`).join('');
+            dirSelect.innerHTML = '<option value="">Todas</option>' + directives.map(d => `<option value="${d}">${d}</option>`).join('');
+            renderPagination('csp', paginationState.csp);
+            applyTableFilters('csp');
+        } catch (e) { console.error('Error loading CSP reports:', e); }
+    }
+
+    async function loadNginxLogs() {
+        const f = getFilters();
+        const page = paginationState.nginx.page;
+        const ipFilter = document.getElementById('filterNginxIp').value.trim();
+        const params = new URLSearchParams({ hours: f.hours, site: f.site || '', app: f.app || '', limit: 100, page: page, ip: ipFilter });
+        try {
+            const res = await apiFetch(`${basePath}/api/nginx-logs?${params}`);
+            const response = await res.json();
+            tableData.nginx = response.data || [];
+            paginationState.nginx = {
+                page: response.pagination.page,
+                totalPages: response.pagination.total_pages,
+                totalRecords: response.pagination.total_records
+            };
+            const types = [...new Set(tableData.nginx.map(r => r.log_type))];
+            const statuses = [...new Set(tableData.nginx.map(r => r.status_code).filter(s => s))];
+            document.getElementById('filterNginxType').innerHTML = '<option value="">Todos</option>' + types.map(t => `<option value="${t}">${t}</option>`).join('');
+            document.getElementById('filterNginxStatus').innerHTML = '<option value="">Todos</option>' + statuses.sort().map(s => `<option value="${s}">${s}</option>`).join('');
+            renderPagination('nginx', paginationState.nginx);
+            applyTableFilters('nginx');
+        } catch (e) { console.error('Error loading nginx logs:', e); }
+    }
+
+    async function loadFail2banEvents() {
+        const f = getFilters();
+        const page = paginationState.fail2ban.page;
+        const ipFilter = document.getElementById('filterF2bIp').value.trim();
+        const params = new URLSearchParams({ hours: f.hours, limit: 100, page: page, ip: ipFilter });
+        try {
+            const res = await apiFetch(`${basePath}/api/fail2ban-events?${params}`);
+            const response = await res.json();
+            tableData.fail2ban = response.data || [];
+            paginationState.fail2ban = {
+                page: response.pagination.page,
+                totalPages: response.pagination.total_pages,
+                totalRecords: response.pagination.total_records
+            };
+            const jails = [...new Set(tableData.fail2ban.map(r => r.jail))];
+            document.getElementById('filterF2bJail').innerHTML = '<option value="">Todas</option>' + jails.map(j => `<option value="${j}">${j}</option>`).join('');
+            renderPagination('fail2ban', paginationState.fail2ban);
+            applyTableFilters('fail2ban');
+        } catch (e) { console.error('Error loading fail2ban events:', e); }
+    }
+
+    async function loadPageData() {
+        await Promise.all([
+            loadDashboardStats(),
+            loadFail2banStats(),
+            loadTimeline(),
+            loadCspReports(),
+            loadNginxLogs(),
+            loadFail2banEvents()
+        ]);
+    }
+
+    function initPage() {
+        initCharts();
+        ['filterSite', 'filterApp'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('change', refreshAll);
+        });
+        document.querySelectorAll('th.sortable').forEach(th => {
+            th.addEventListener('click', () => handleSort(th));
+        });
+        Object.keys(sortState).forEach(table => {
+            const state = sortState[table];
+            const th = document.querySelector(`th[data-table="${table}"][data-field="${state.field}"]`);
+            if (th) th.classList.add(state.direction);
+        });
+    }
+</script>
+{% endblock %}

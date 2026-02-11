@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Monitor{% endblock %} - Nginx Monitor</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #0f0f1a;
+            color: #eee;
+            line-height: 1.6;
+        }
+        .container { max-width: 1600px; margin: 0 auto; padding: 20px; }
+        h1 { color: #00d9ff; margin-bottom: 5px; font-size: 1.8em; }
+        .subtitle { color: #666; margin-bottom: 20px; font-size: 0.9em; }
+        h2 { color: #00d9ff; margin: 0 0 15px; font-size: 1.1em; font-weight: 600; }
+        h3 { color: #f39c12; margin: 30px 0 20px; font-size: 1.3em; font-weight: 600; border-bottom: 2px solid #f39c12; padding-bottom: 10px; }
+
+        /* Navigation */
+        .main-nav {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            padding: 10px 0;
+            border-bottom: 1px solid #2a2a4a;
+        }
+        .main-nav a {
+            padding: 12px 25px;
+            background: #1a1a2e;
+            border: 1px solid #2a2a4a;
+            border-radius: 8px;
+            color: #888;
+            text-decoration: none;
+            font-size: 0.95em;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .main-nav a:hover { color: #fff; background: #252540; border-color: #3a3a5a; }
+        .main-nav a.active {
+            background: linear-gradient(135deg, #00d9ff, #0099cc);
+            color: #000;
+            border-color: #00d9ff;
+            font-weight: 600;
+        }
+
+        /* Filtros */
+        .filters {
+            background: #1a1a2e;
+            padding: 15px 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            align-items: center;
+            border: 1px solid #2a2a4a;
+        }
+        .filter-group { display: flex; flex-direction: column; gap: 5px; }
+        .filter-group label { font-size: 0.75em; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+        select, button {
+            padding: 10px 15px;
+            border: 1px solid #333;
+            border-radius: 6px;
+            background: #0f0f23;
+            color: #eee;
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+        select:focus { outline: none; border-color: #00d9ff; }
+        button { background: linear-gradient(135deg, #00d9ff, #0099cc); color: #000; font-weight: 600; border: none; }
+        button:hover { background: linear-gradient(135deg, #00eeff, #00aadd); }
+        button.secondary { background: #2a2a4a; color: #fff; }
+        button.secondary:hover { background: #3a3a5a; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* Stats Cards Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+        .stats-grid-4 {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+        .stat-card {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            padding: 20px;
+            border-radius: 12px;
+            text-align: center;
+            border: 1px solid #2a2a4a;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0,217,255,0.1);
+        }
+        .stat-card .number {
+            font-size: 2.2em;
+            font-weight: 700;
+            color: #00d9ff;
+            line-height: 1.2;
+        }
+        .stat-card .label { color: #888; font-size: 0.8em; margin-top: 5px; }
+        .stat-card.success .number { color: #2ecc71; }
+        .stat-card.warning .number { color: #f39c12; }
+        .stat-card.danger .number { color: #e74c3c; }
+        .stat-card.info .number { color: #3498db; }
+
+        /* Charts Grid */
+        .charts-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+            margin-bottom: 25px;
+        }
+        .chart-card {
+            background: #1a1a2e;
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #2a2a4a;
+        }
+        .chart-container {
+            position: relative;
+            height: 280px;
+        }
+
+        /* Two columns for smaller charts */
+        .charts-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 25px;
+        }
+        .charts-row .chart-container {
+            height: 220px;
+        }
+
+        /* Top IPs */
+        .top-ips-card {
+            background: #1a1a2e;
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #2a2a4a;
+        }
+        .ip-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid #2a2a4a;
+        }
+        .ip-row:last-child { border-bottom: none; }
+        .ip-info { display: flex; align-items: center; gap: 12px; }
+        .ip-flag { font-size: 1.5em; }
+        .ip-address { font-family: 'Monaco', 'Menlo', monospace; font-size: 0.95em; }
+        .ip-country { color: #666; font-size: 0.8em; }
+        .ip-time { color: #888; font-size: 0.75em; margin-left: 8px; }
+        .ip-count {
+            background: linear-gradient(135deg, #e74c3c, #c0392b);
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+        .ip-count.warning {
+            background: linear-gradient(135deg, #f39c12, #d68910);
+        }
+        .ip-badges {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .ip-badges .badge {
+            font-size: 0.7em;
+            padding: 3px 8px;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 0;
+            padding: 0 5px;
+        }
+        .tab {
+            padding: 12px 25px;
+            background: #1a1a2e;
+            border: 1px solid #2a2a4a;
+            border-bottom: none;
+            border-radius: 10px 10px 0 0;
+            color: #888;
+            cursor: pointer;
+            font-size: 0.9em;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .tab:hover { color: #fff; background: #252540; }
+        .tab.active {
+            background: #00d9ff;
+            color: #000;
+            border-color: #00d9ff;
+            font-weight: 600;
+        }
+
+        /* Table Filters */
+        .table-filters {
+            background: #0f0f23;
+            padding: 12px 15px;
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            align-items: center;
+            border-bottom: 1px solid #2a2a4a;
+        }
+        .table-filters label {
+            font-size: 0.75em;
+            color: #666;
+            margin-right: 5px;
+        }
+        .table-filters select {
+            padding: 6px 10px;
+            font-size: 0.85em;
+            background: #1a1a2e;
+        }
+        .table-filters .filter-count {
+            margin-left: auto;
+            color: #555;
+            font-size: 0.8em;
+        }
+
+        /* Tables */
+        .table-container {
+            background: #1a1a2e;
+            border-radius: 0 12px 12px 12px;
+            overflow: hidden;
+            border: 1px solid #2a2a4a;
+        }
+        table { width: 100%; border-collapse: collapse; }
+        th, td {
+            padding: 14px 15px;
+            text-align: left;
+            border-bottom: 1px solid #2a2a4a;
+        }
+        th {
+            background: #0f0f23;
+            color: #00d9ff;
+            font-weight: 600;
+            font-size: 0.85em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        th.sortable { cursor: pointer; user-select: none; transition: background 0.2s; }
+        th.sortable:hover { background: #1a1a2e; }
+        th.sortable::after { content: ''; margin-left: 6px; opacity: 0.3; }
+        th.sortable.asc::after { content: '▲'; opacity: 1; }
+        th.sortable.desc::after { content: '▼'; opacity: 1; }
+        tr:hover { background: #252540; }
+        tbody tr:last-child td { border-bottom: none; }
+
+        /* Badges */
+        .badge {
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.75em;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        .badge-site { background: #3b5998; }
+        .badge-app { display: inline-block; }
+        .badge-rate_limit { background: #e74c3c; }
+        .badge-bad_bot { background: #c0392b; }
+        .badge-http_444 { background: #8e44ad; }
+        .badge-http_429 { background: #d35400; }
+        .badge-http_403 { background: #e67e22; }
+        .badge-http_404 { background: #7f8c8d; }
+        .badge-general_error { background: #95a5a6; }
+        .badge-http_500, .badge-http_502, .badge-http_503 { background: #c0392b; }
+        .badge-jail { background: #8e44ad; }
+        .badge-found { background: #f39c12; }
+        .badge-ban { background: #e74c3c; }
+        .badge-unban { background: #27ae60; }
+        .badge-sshd { background: #2980b9; }
+        .badge-nginx-limit-req { background: #e74c3c; }
+        .badge-nginx-badbots { background: #c0392b; }
+        .badge-nginx-botsearch { background: #8e44ad; }
+        .badge-block { background: #e74c3c; }
+        .badge-allow { background: #27ae60; }
+        .badge-audit { background: #f39c12; }
+        .badge-tcp { background: #3498db; }
+        .badge-udp { background: #9b59b6; }
+        .badge-icmp { background: #95a5a6; }
+
+        /* Responsive */
+        @media (max-width: 1200px) {
+            .stats-grid { grid-template-columns: repeat(3, 1fr); }
+            .stats-grid-4 { grid-template-columns: repeat(2, 1fr); }
+            .charts-grid { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 768px) {
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+            .stats-grid-4 { grid-template-columns: repeat(2, 1fr); }
+            .charts-row { grid-template-columns: 1fr; }
+            .filters { flex-direction: column; align-items: stretch; }
+            .main-nav { flex-wrap: wrap; }
+            table { font-size: 0.85em; }
+            th, td { padding: 10px 8px; }
+        }
+
+        .loading { text-align: center; padding: 40px; color: #666; }
+        .empty { text-align: center; padding: 40px; color: #555; }
+        .truncate { max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .mono { font-family: 'Monaco', 'Menlo', monospace; font-size: 0.9em; }
+        .last-update { color: #555; font-size: 0.8em; margin-left: auto; }
+        .section-divider { border-top: 2px solid #2a2a4a; margin: 40px 0 30px; }
+
+        {% block extra_styles %}{% endblock %}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Nginx Monitor</h1>
+        <p class="subtitle">Dashboard de seguridad y trafico</p>
+
+        <!-- Navigation -->
+        <nav class="main-nav" id="mainNav">
+            <a href="/nginx-monitor/" class="{% if active_page == 'nginx' %}active{% endif %}">Nginx</a>
+            <a href="/nginx-monitor/ssh-vpn" class="{% if active_page == 'ssh_vpn' %}active{% endif %}">SSH/VPN</a>
+            <a href="/nginx-monitor/ufw" class="{% if active_page == 'ufw' %}active{% endif %}">UFW Firewall</a>
+        </nav>
+
+        <!-- Filtros -->
+        <div class="filters">
+            {% block filters %}
+            <div class="filter-group">
+                <label>Periodo</label>
+                <select id="filterHours">
+                    <option value="1">Ultima hora</option>
+                    <option value="6">Ultimas 6 horas</option>
+                    <option value="24" selected>Ultimas 24 horas</option>
+                    <option value="72">Ultimos 3 dias</option>
+                    <option value="168">Ultima semana</option>
+                    <option value="720">Ultimo mes</option>
+                    <option value="2160">Ultimos 3 meses</option>
+                </select>
+            </div>
+            {% endblock %}
+            <div class="filter-group">
+                <label>&nbsp;</label>
+                <button id="btnRefresh" onclick="refreshAll()">Actualizar</button>
+            </div>
+            <div class="filter-group">
+                <label>&nbsp;</label>
+                <button class="secondary" id="btnSync" onclick="syncLogs()">Sincronizar Logs</button>
+            </div>
+            <span class="last-update" id="lastUpdate"></span>
+        </div>
+
+        {% block content %}{% endblock %}
+    </div>
+
+    <script>
+        const basePath = window.location.pathname.includes('/nginx-monitor') ? '/nginx-monitor' : '';
+        let charts = {};
+        const geoCache = {};
+
+        // Chart.js default colors
+        const chartColors = {
+            blue: 'rgba(0, 217, 255, 1)',
+            blueFade: 'rgba(0, 217, 255, 0.1)',
+            green: 'rgba(46, 204, 113, 1)',
+            greenFade: 'rgba(46, 204, 113, 0.1)',
+            orange: 'rgba(243, 156, 18, 1)',
+            orangeFade: 'rgba(243, 156, 18, 0.1)',
+            purple: 'rgba(155, 89, 182, 1)',
+            red: 'rgba(231, 76, 60, 1)',
+            redFade: 'rgba(231, 76, 60, 0.1)'
+        };
+
+        // API fetch wrapper
+        async function apiFetch(url, options = {}) {
+            const response = await fetch(url, { ...options, credentials: 'same-origin' });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return response;
+        }
+
+        function getFilters() {
+            const filters = { hours: document.getElementById('filterHours').value };
+            const siteEl = document.getElementById('filterSite');
+            const appEl = document.getElementById('filterApp');
+            if (siteEl) filters.site = siteEl.value;
+            if (appEl) filters.app = appEl.value;
+            return filters;
+        }
+
+        function formatDate(isoString) {
+            const d = new Date(isoString);
+            return d.toLocaleString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+        }
+
+        function formatTime(isoString) {
+            if (!isoString) return '';
+            const d = new Date(isoString);
+            return d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+        }
+
+        function formatNumber(num) {
+            if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+            if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+            return num.toString();
+        }
+
+        function countryCodeToFlag(countryCode) {
+            if (!countryCode || countryCode.length !== 2) return '';
+            const codePoints = countryCode.toUpperCase().split('').map(char => 127397 + char.charCodeAt());
+            return String.fromCodePoint(...codePoints);
+        }
+
+        async function getGeoInfoBatch(ips) {
+            const uncached = ips.filter(ip => !geoCache[ip]);
+            if (uncached.length === 0) return;
+            try {
+                const res = await apiFetch(`${basePath}/api/geoip`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ips: uncached.slice(0, 100) })
+                });
+                const data = await res.json();
+                data.forEach(item => {
+                    geoCache[item.query] = item.status === 'success'
+                        ? { country: item.country, countryCode: item.countryCode, flag: countryCodeToFlag(item.countryCode) }
+                        : { country: 'Desconocido', countryCode: '', flag: '' };
+                });
+            } catch (e) {
+                console.error('Error fetching geo info:', e);
+            }
+        }
+
+        // Badge helpers
+        function getAppBadge(app) {
+            let hash = 0;
+            for (let i = 0; i < app.length; i++) hash = app.charCodeAt(i) + ((hash << 5) - hash);
+            const hue = Math.abs(hash) % 360;
+            const bg = `hsl(${hue}, 55%, 35%)`;
+            return `<span class="badge badge-app" style="background:${bg}">${app}</span>`;
+        }
+
+        function getTypeBadge(type) {
+            return `<span class="badge badge-${type}">${type.replace('_', ' ')}</span>`;
+        }
+
+        function getJailBadge(jail) {
+            const cls = jail.includes('limit-req') ? 'badge-nginx-limit-req' :
+                       jail.includes('badbots') ? 'badge-nginx-badbots' :
+                       jail.includes('botsearch') ? 'badge-nginx-botsearch' :
+                       jail === 'sshd' ? 'badge-sshd' : 'badge-jail';
+            return `<span class="badge ${cls}">${jail}</span>`;
+        }
+
+        function getEventBadge(eventType) {
+            const cls = eventType === 'ban' ? 'badge-ban' :
+                       eventType === 'unban' ? 'badge-unban' : 'badge-found';
+            return `<span class="badge ${cls}">${eventType}</span>`;
+        }
+
+        function getUfwActionBadge(action) {
+            const cls = action === 'BLOCK' ? 'badge-block' :
+                       action === 'ALLOW' ? 'badge-allow' : 'badge-audit';
+            return `<span class="badge ${cls}">${action}</span>`;
+        }
+
+        function getProtoBadge(proto) {
+            const cls = proto === 'TCP' ? 'badge-tcp' :
+                       proto === 'UDP' ? 'badge-udp' : 'badge-icmp';
+            return `<span class="badge ${cls}">${proto}</span>`;
+        }
+
+        function getPortService(port) {
+            const services = {
+                22: 'SSH', 23: 'Telnet', 25: 'SMTP', 53: 'DNS', 80: 'HTTP', 443: 'HTTPS',
+                3306: 'MySQL', 3389: 'RDP', 5432: 'PostgreSQL', 6379: 'Redis',
+                8080: 'HTTP-Alt', 8443: 'HTTPS-Alt', 27017: 'MongoDB', 1433: 'MSSQL',
+                445: 'SMB', 139: 'NetBIOS', 21: 'FTP', 110: 'POP3', 143: 'IMAP'
+            };
+            return services[port] ? `${port} (${services[port]})` : port;
+        }
+
+        async function syncLogs() {
+            const btn = document.getElementById('btnSync');
+            btn.disabled = true;
+            btn.textContent = 'Sincronizando...';
+            try {
+                await apiFetch(`${basePath}/api/sync`, { method: 'POST' });
+                btn.textContent = 'Listo!';
+                setTimeout(() => { btn.textContent = 'Sincronizar Logs'; btn.disabled = false; }, 2000);
+                refreshAll();
+            } catch (e) {
+                btn.textContent = 'Error!';
+                setTimeout(() => { btn.textContent = 'Sincronizar Logs'; btn.disabled = false; }, 2000);
+            }
+        }
+
+        // To be overridden by each page
+        async function refreshAll() {
+            const btn = document.getElementById('btnRefresh');
+            btn.disabled = true;
+            btn.textContent = 'Cargando...';
+            try {
+                await loadPageData();
+                document.getElementById('lastUpdate').textContent =
+                    'Actualizado: ' + new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+            } catch (e) {
+                console.error('Error refreshing:', e);
+            }
+            btn.textContent = 'Actualizar';
+            btn.disabled = false;
+        }
+
+        // Event listeners for global filters
+        document.getElementById('filterHours').addEventListener('change', refreshAll);
+    </script>
+
+    {% block scripts %}{% endblock %}
+
+    <script>
+        // Initialize page
+        if (typeof initPage === 'function') initPage();
+        refreshAll();
+        setInterval(refreshAll, 60000);
+    </script>
+</body>
+</html>

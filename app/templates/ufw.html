@@ -1,0 +1,356 @@
+{% extends "base.html" %}
+
+{% block title %}UFW Firewall{% endblock %}
+
+{% block content %}
+<!-- ========== UFW SECTION ========== -->
+<h3>UFW/iptables - Firewall de Red</h3>
+
+<!-- UFW Stats Cards -->
+<div class="stats-grid-4">
+    <div class="stat-card danger">
+        <div class="number" id="statUfwBlocks">-</div>
+        <div class="label">Conexiones Bloqueadas</div>
+    </div>
+    <div class="stat-card info">
+        <div class="number" id="statUfwTotal">-</div>
+        <div class="label">Total Eventos</div>
+    </div>
+    <div class="stat-card">
+        <div class="number" id="statUfwTcp">-</div>
+        <div class="label">TCP Bloqueado</div>
+    </div>
+    <div class="stat-card warning">
+        <div class="number" id="statUfwUdp">-</div>
+        <div class="label">UDP Bloqueado</div>
+    </div>
+</div>
+
+<!-- UFW Charts -->
+<div class="charts-row">
+    <div class="chart-card">
+        <h2>Top Puertos Atacados</h2>
+        <div class="chart-container">
+            <canvas id="chartUfwPorts"></canvas>
+        </div>
+    </div>
+    <div class="chart-card">
+        <h2>Actividad UFW por Hora</h2>
+        <div class="chart-container">
+            <canvas id="chartUfwTimeline"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- UFW Top IPs -->
+<div class="charts-row">
+    <div class="top-ips-card">
+        <h2>Top IPs Bloqueadas (UFW)</h2>
+        <div id="topUfwBlocked">
+            <div class="loading">Cargando...</div>
+        </div>
+    </div>
+    <div class="chart-card">
+        <h2>Categorias de Bloqueo</h2>
+        <div class="chart-container">
+            <canvas id="chartUfwCategory"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- ========== UFW EVENTS TABLE ========== -->
+<div class="section-divider"></div>
+
+<h3>Eventos UFW</h3>
+
+<div class="table-container" style="border-radius: 12px;">
+    <div class="table-filters">
+        <label>Accion:</label>
+        <select id="filterUfwAction" onchange="applyTableFilters()">
+            <option value="">Todas</option>
+            <option value="BLOCK">BLOCK</option>
+            <option value="ALLOW">ALLOW</option>
+            <option value="AUDIT">AUDIT</option>
+        </select>
+        <label style="margin-left:15px">Protocolo:</label>
+        <select id="filterUfwProto" onchange="applyTableFilters()">
+            <option value="">Todos</option>
+            <option value="TCP">TCP</option>
+            <option value="UDP">UDP</option>
+            <option value="ICMP">ICMP</option>
+        </select>
+        <label style="margin-left:15px">Puerto:</label>
+        <select id="filterUfwPort" onchange="applyTableFilters()">
+            <option value="">Todos</option>
+        </select>
+        <label style="margin-left:15px">IP:</label>
+        <input type="text" id="filterUfwIpInput" placeholder="Filtrar por IP..." style="padding: 6px 10px; font-size: 0.85em; background: #1a1a2e; border: 1px solid #333; border-radius: 6px; color: #eee; width: 140px;">
+        <button onclick="loadUfwEvents()" style="margin-left:8px;padding:6px 12px;background:#4a5568;color:#fff;border:none;border-radius:4px;cursor:pointer">Buscar</button>
+        <span class="filter-count" id="ufwCount"></span>
+    </div>
+    <div class="pagination-controls" id="ufwPagination" style="margin-bottom:10px"></div>
+    <table>
+        <thead>
+            <tr>
+                <th class="sortable" data-field="timestamp" data-type="date">Fecha</th>
+                <th class="sortable" data-field="action" data-type="string">Accion</th>
+                <th class="sortable" data-field="src_ip" data-type="string">IP Origen</th>
+                <th class="sortable" data-field="proto" data-type="string">Proto</th>
+                <th class="sortable" data-field="dst_port" data-type="number">Puerto</th>
+                <th>Pais</th>
+            </tr>
+        </thead>
+        <tbody id="ufwTableBody">
+            <tr><td colspan="6" class="loading">Cargando...</td></tr>
+        </tbody>
+    </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let tableData = [];
+    let paginationState = { page: 1, totalPages: 1, totalRecords: 0 };
+    let sortState = { field: 'timestamp', direction: 'desc' };
+
+    function getBlockReasonBadge(reason) {
+        const reasons = {
+            'ssh_attack': { cls: 'badge-sshd', label: 'SSH' },
+            'db_attack': { cls: 'badge-block', label: 'DB' },
+            'web_scan': { cls: 'badge-nginx-badbots', label: 'WEB' },
+            'smb_attack': { cls: 'badge-block', label: 'SMB' },
+            'mail_scan': { cls: 'badge-audit', label: 'MAIL' },
+            'vpn_scan': { cls: 'badge-audit', label: 'VPN' },
+            'telnet': { cls: 'badge-block', label: 'TELNET' },
+            'rdp_attack': { cls: 'badge-block', label: 'RDP' },
+            'port_scan': { cls: 'badge-audit', label: 'SCAN' },
+            'scan': { cls: 'badge-audit', label: 'SCAN' }
+        };
+        const r = reasons[reason] || { cls: 'badge-audit', label: reason || 'SCAN' };
+        return `<span class="badge ${r.cls}">${r.label}</span>`;
+    }
+
+    function sortData(data, field, direction, type) {
+        return [...data].sort((a, b) => {
+            let valA = a[field], valB = b[field];
+            if (type === 'date') { valA = new Date(valA).getTime(); valB = new Date(valB).getTime(); }
+            else if (type === 'number') { valA = parseInt(valA) || 0; valB = parseInt(valB) || 0; }
+            else { valA = (valA || '').toString().toLowerCase(); valB = (valB || '').toString().toLowerCase(); }
+            if (valA < valB) return direction === 'asc' ? -1 : 1;
+            if (valA > valB) return direction === 'asc' ? 1 : -1;
+            return 0;
+        });
+    }
+
+    function handleSort(th) {
+        const field = th.dataset.field;
+        const type = th.dataset.type;
+        if (sortState.field === field) {
+            sortState.direction = sortState.direction === 'asc' ? 'desc' : 'asc';
+        } else {
+            sortState.field = field;
+            sortState.direction = 'desc';
+        }
+        document.querySelectorAll('th.sortable').forEach(h => h.classList.remove('asc', 'desc'));
+        th.classList.add(sortState.direction);
+        applyTableFilters();
+    }
+
+    function applyTableFilters() {
+        let data = [...tableData];
+        const action = document.getElementById('filterUfwAction').value;
+        const proto = document.getElementById('filterUfwProto').value;
+        const port = document.getElementById('filterUfwPort').value;
+
+        if (action) data = data.filter(r => r.action === action);
+        if (proto) data = data.filter(r => r.proto === proto);
+        if (port) data = data.filter(r => r.dst_port == port);
+
+        const th = document.querySelector(`th[data-field="${sortState.field}"]`);
+        const type = th ? th.dataset.type : 'string';
+        data = sortData(data, sortState.field, sortState.direction, type);
+
+        renderTable(data);
+        document.getElementById('ufwCount').textContent = `${data.length} registros`;
+    }
+
+    function renderPagination(pagination) {
+        const container = document.getElementById('ufwPagination');
+        if (!pagination || pagination.totalPages <= 1) {
+            container.innerHTML = '';
+            return;
+        }
+
+        const { page, totalPages, totalRecords } = pagination;
+        let html = '<div style="display:flex;align-items:center;gap:10px">';
+        html += `<span style="color:#888">Pagina ${page} de ${totalPages} (${totalRecords} registros)</span>`;
+        html += `<button onclick="changePage(${page - 1})" ${page <= 1 ? 'disabled' : ''} style="padding:4px 8px;background:#4a5568;color:#fff;border:none;border-radius:4px;cursor:pointer">Anterior</button>`;
+        html += `<button onclick="changePage(${page + 1})" ${page >= totalPages ? 'disabled' : ''} style="padding:4px 8px;background:#4a5568;color:#fff;border:none;border-radius:4px;cursor:pointer">Siguiente</button>`;
+        html += '</div>';
+        container.innerHTML = html;
+    }
+
+    function changePage(newPage) {
+        paginationState.page = newPage;
+        loadUfwEvents();
+    }
+
+    async function renderTable(data) {
+        const tbody = document.getElementById('ufwTableBody');
+        if (data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="empty">No hay eventos UFW</td></tr>';
+            return;
+        }
+        const ips = data.map(r => r.src_ip);
+        await getGeoInfoBatch(ips);
+        tbody.innerHTML = data.map(r => {
+            const geo = geoCache[r.src_ip] || { flag: '', country: '' };
+            return `
+                <tr>
+                    <td class="mono">${formatDate(r.timestamp)}</td>
+                    <td>${getUfwActionBadge(r.action)}</td>
+                    <td class="mono">${r.src_ip}</td>
+                    <td>${getProtoBadge(r.proto)}</td>
+                    <td>${getPortService(r.dst_port)}</td>
+                    <td>${geo.flag} ${geo.country}</td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    function initCharts() {
+        const defaultOptions = {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { labels: { color: '#888' } } },
+            scales: {
+                x: { ticks: { color: '#666' }, grid: { color: '#2a2a4a' } },
+                y: { ticks: { color: '#666' }, grid: { color: '#2a2a4a' }, beginAtZero: true }
+            }
+        };
+
+        charts.ufwPorts = new Chart(document.getElementById('chartUfwPorts'), {
+            type: 'bar',
+            data: { labels: [], datasets: [{ data: [], backgroundColor: chartColors.red }] },
+            options: { ...defaultOptions, indexAxis: 'y', plugins: { legend: { display: false } } }
+        });
+
+        charts.ufwTimeline = new Chart(document.getElementById('chartUfwTimeline'), {
+            type: 'line',
+            data: { labels: [], datasets: [] },
+            options: defaultOptions
+        });
+
+        charts.ufwCategory = new Chart(document.getElementById('chartUfwCategory'), {
+            type: 'doughnut',
+            data: { labels: [], datasets: [{ data: [], backgroundColor: [
+                chartColors.red, chartColors.blue, chartColors.orange, chartColors.purple,
+                chartColors.green, '#e67e22', '#1abc9c', '#9b59b6', '#34495e', '#95a5a6'
+            ] }] },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: '#888' } } } }
+        });
+    }
+
+    async function loadUfwStats() {
+        const f = getFilters();
+        const params = new URLSearchParams({ hours: f.hours });
+
+        try {
+            const res = await apiFetch(`${basePath}/api/ufw-stats?${params}`);
+            const data = await res.json();
+
+            document.getElementById('statUfwBlocks').textContent = formatNumber(data.totals.blocks);
+            document.getElementById('statUfwTotal').textContent = formatNumber(data.totals.total);
+
+            const tcpBlocked = data.by_proto.find(p => p.proto === 'TCP')?.count || 0;
+            const udpBlocked = data.by_proto.find(p => p.proto === 'UDP')?.count || 0;
+            document.getElementById('statUfwTcp').textContent = formatNumber(tcpBlocked);
+            document.getElementById('statUfwUdp').textContent = formatNumber(udpBlocked);
+
+            // Top ports chart
+            if (data.top_ports && data.top_ports.length > 0) {
+                charts.ufwPorts.data.labels = data.top_ports.map(p => p.service || p.port);
+                charts.ufwPorts.data.datasets[0].data = data.top_ports.map(p => p.count);
+                charts.ufwPorts.update();
+            }
+
+            // Category chart
+            if (data.by_category && data.by_category.length > 0) {
+                charts.ufwCategory.data.labels = data.by_category.map(c => c.label);
+                charts.ufwCategory.data.datasets[0].data = data.by_category.map(c => c.count);
+                charts.ufwCategory.update();
+            }
+
+            // Timeline chart
+            if (data.timeline && data.timeline.length > 0) {
+                charts.ufwTimeline.data.labels = data.timeline.map(t => t.timestamp.split(' ')[1] || t.timestamp);
+                charts.ufwTimeline.data.datasets = [
+                    { label: 'BLOCK', data: data.timeline.map(t => t.BLOCK || 0), borderColor: chartColors.red, backgroundColor: chartColors.redFade, fill: true },
+                    { label: 'ALLOW', data: data.timeline.map(t => t.ALLOW || 0), borderColor: chartColors.green, backgroundColor: chartColors.greenFade, fill: true }
+                ];
+                charts.ufwTimeline.update();
+            }
+
+            // Top IPs blocked
+            if (data.top_src_ips && data.top_src_ips.length > 0) {
+                const ips = data.top_src_ips.map(item => item.ip);
+                await getGeoInfoBatch(ips);
+                document.getElementById('topUfwBlocked').innerHTML = data.top_src_ips.map(item => {
+                    const geo = geoCache[item.ip] || { flag: '', country: '' };
+                    const portInfo = item.main_port ? `:${item.main_port}` : '';
+                    const timeStr = item.last_seen ? `<span class="ip-time">${formatTime(item.last_seen)}</span>` : '';
+                    return `<div class="ip-row"><div class="ip-info"><span class="ip-flag">${geo.flag}</span><div><div class="ip-address">${item.ip}${portInfo}</div><div class="ip-country">${geo.country}${timeStr}</div></div></div><div class="ip-badges">${getBlockReasonBadge(item.reason)}<span class="ip-count">${item.count}</span></div></div>`;
+                }).join('');
+            } else {
+                document.getElementById('topUfwBlocked').innerHTML = '<div class="empty">Sin IPs bloqueadas</div>';
+            }
+
+        } catch (e) {
+            console.error('Error loading UFW stats:', e);
+        }
+    }
+
+    async function loadUfwEvents() {
+        const f = getFilters();
+        const page = paginationState.page;
+        const ipFilter = document.getElementById('filterUfwIpInput').value.trim();
+        const params = new URLSearchParams({ hours: f.hours, limit: 100, page: page, ip: ipFilter });
+
+        try {
+            const res = await apiFetch(`${basePath}/api/ufw-events?${params}`);
+            const response = await res.json();
+            tableData = response.data || [];
+            paginationState = {
+                page: response.pagination.page,
+                totalPages: response.pagination.total_pages,
+                totalRecords: response.pagination.total_records
+            };
+
+            // Populate port filter
+            const ports = [...new Set(tableData.map(r => r.dst_port).filter(p => p))].sort((a, b) => a - b);
+            document.getElementById('filterUfwPort').innerHTML = '<option value="">Todos</option>' + ports.map(p => `<option value="${p}">${getPortService(p)}</option>`).join('');
+
+            renderPagination(paginationState);
+            applyTableFilters();
+        } catch (e) {
+            console.error('Error loading UFW events:', e);
+        }
+    }
+
+    async function loadPageData() {
+        await Promise.all([
+            loadUfwStats(),
+            loadUfwEvents()
+        ]);
+    }
+
+    function initPage() {
+        initCharts();
+        document.querySelectorAll('th.sortable').forEach(th => {
+            th.addEventListener('click', () => handleSort(th));
+        });
+        const th = document.querySelector(`th[data-field="${sortState.field}"]`);
+        if (th) th.classList.add(sortState.direction);
+    }
+</script>
+{% endblock %}
