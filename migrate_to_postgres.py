@@ -11,21 +11,15 @@ from datetime import datetime
 
 # Configuración
 SQLITE_PATH = './data/monitor.db'
-POSTGRES_URL = os.environ.get('DATABASE_URL', 'postgresql://monitor:change-me-in-production@localhost:5432/monitor')
+POSTGRES_URL = os.environ.get('DATABASE_URL', 'postgresql+psycopg://monitor:change-me-in-production@localhost:5432/monitor')
 
 def get_postgres_connection():
     """Conectar a PostgreSQL"""
-    import psycopg2
-    from urllib.parse import urlparse
+    import psycopg
 
-    parsed = urlparse(POSTGRES_URL)
-    return psycopg2.connect(
-        host=parsed.hostname,
-        port=parsed.port or 5432,
-        user=parsed.username,
-        password=parsed.password,
-        dbname=parsed.path[1:]
-    )
+    # Strip SQLAlchemy dialect suffix (+psycopg) for direct psycopg connection
+    url = POSTGRES_URL.replace('+psycopg', '')
+    return psycopg.connect(url)
 
 def create_postgres_tables(pg_conn):
     """Crear tablas en PostgreSQL"""

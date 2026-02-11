@@ -22,6 +22,8 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
     'pool_pre_ping': True,
     'pool_recycle': 300,
+    'pool_size': 5,
+    'max_overflow': 10,
 }
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'change-me-in-production')
 
@@ -419,27 +421,26 @@ def parse_visits_from_access_log(log_path='/var/log/nginx/access.log', last_line
 def sync_visits_internal():
     """Sincroniza las visitas a la base de datos (sin app_context)"""
     visit_data = parse_visits_from_access_log()
+    if not visit_data:
+        return
+
+    # Batch: cargar todos los existentes de una sola query
+    timestamps = list({ts for (ts, _, _) in visit_data.keys()})
+    existing_map = {}
+    for rec in VisitStats.query.filter(VisitStats.timestamp.in_(timestamps)).all():
+        existing_map[(rec.timestamp, rec.site, rec.app)] = rec
 
     for (hour_ts, site, app_name), data in visit_data.items():
-        # Buscar o crear registro
-        existing = VisitStats.query.filter_by(
-            timestamp=hour_ts, site=site, app=app_name
-        ).first()
-
+        existing = existing_map.get((hour_ts, site, app_name))
         if existing:
-            # Actualizar solo si hay mas visitas
             if data['visits'] > existing.visits:
                 existing.visits = data['visits']
                 existing.unique_ips = len(data['ips'])
         else:
-            stat = VisitStats(
-                timestamp=hour_ts,
-                site=site,
-                app=app_name,
-                visits=data['visits'],
-                unique_ips=len(data['ips'])
-            )
-            db.session.add(stat)
+            db.session.add(VisitStats(
+                timestamp=hour_ts, site=site, app=app_name,
+                visits=data['visits'], unique_ips=len(data['ips'])
+            ))
 
     try:
         db.session.commit()
@@ -497,21 +498,20 @@ def sync_fail2ban_internal():
     cutoff = last_event.timestamp if last_event else datetime.utcnow() - timedelta(days=7)
 
     entries = parse_fail2ban_log()
-    new_count = 0
 
+    # Batch: cargar keys existentes en un set
+    existing_keys = {
+        (e.timestamp, e.jail, e.ip, e.event_type)
+        for e in Fail2BanEvent.query.filter(Fail2BanEvent.timestamp > cutoff).all()
+    }
+
+    new_count = 0
     for entry in entries:
         if entry['timestamp'] > cutoff:
-            # Verificar que no existe ya (por timestamp, jail, ip, event_type)
-            existing = Fail2BanEvent.query.filter_by(
-                timestamp=entry['timestamp'],
-                jail=entry['jail'],
-                ip=entry['ip'],
-                event_type=entry['event_type']
-            ).first()
-
-            if not existing:
-                event = Fail2BanEvent(**entry)
-                db.session.add(event)
+            key = (entry['timestamp'], entry['jail'], entry['ip'], entry['event_type'])
+            if key not in existing_keys:
+                db.session.add(Fail2BanEvent(**entry))
+                existing_keys.add(key)
                 new_count += 1
 
     try:
@@ -574,21 +574,20 @@ def sync_ufw_internal():
     cutoff = last_event.timestamp if last_event else datetime.utcnow() - timedelta(days=7)
 
     entries = parse_ufw_log()
-    new_count = 0
 
+    # Batch: cargar keys existentes en un set
+    existing_keys = {
+        (e.timestamp, e.src_ip, e.dst_port, e.action)
+        for e in UfwEvent.query.filter(UfwEvent.timestamp > cutoff).all()
+    }
+
+    new_count = 0
     for entry in entries:
         if entry['timestamp'] > cutoff:
-            # Verificar que no existe ya (por timestamp, src_ip, dst_port, action)
-            existing = UfwEvent.query.filter_by(
-                timestamp=entry['timestamp'],
-                src_ip=entry['src_ip'],
-                dst_port=entry['dst_port'],
-                action=entry['action']
-            ).first()
-
-            if not existing:
-                event = UfwEvent(**entry)
-                db.session.add(event)
+            key = (entry['timestamp'], entry['src_ip'], entry['dst_port'], entry['action'])
+            if key not in existing_keys:
+                db.session.add(UfwEvent(**entry))
+                existing_keys.add(key)
                 new_count += 1
 
     try:
@@ -751,21 +750,20 @@ def sync_ssh_auth_internal():
     cutoff = last_event.timestamp if last_event else datetime.utcnow() - timedelta(days=7)
 
     entries = parse_auth_log()
-    new_count = 0
 
+    # Batch: cargar keys existentes en un set
+    existing_keys = {
+        (e.timestamp, e.src_ip, e.src_port, e.event_type)
+        for e in SshAuthEvent.query.filter(SshAuthEvent.timestamp > cutoff).all()
+    }
+
+    new_count = 0
     for entry in entries:
         if entry['timestamp'] > cutoff:
-            # Verificar que no existe ya
-            existing = SshAuthEvent.query.filter_by(
-                timestamp=entry['timestamp'],
-                src_ip=entry['src_ip'],
-                src_port=entry['src_port'],
-                event_type=entry['event_type']
-            ).first()
-
-            if not existing:
-                event = SshAuthEvent(**entry)
-                db.session.add(event)
+            key = (entry['timestamp'], entry['src_ip'], entry['src_port'], entry['event_type'])
+            if key not in existing_keys:
+                db.session.add(SshAuthEvent(**entry))
+                existing_keys.add(key)
                 new_count += 1
 
     try:
@@ -1296,7 +1294,7 @@ def api_fail2ban_stats():
 
     # Timeline por hora
     timeline = db.session.query(
-        db.func.to_char(Fail2BanEvent.timestamp, 'YYYY-MM-DD HH24:00').label('hour'),
+        db.func.date_trunc('hour', Fail2BanEvent.timestamp).label('hour'),
         Fail2BanEvent.event_type,
         db.func.count(Fail2BanEvent.id)
     ).filter(
@@ -1311,7 +1309,7 @@ def api_fail2ban_stats():
         timeline_data[hour][event_type] = count
 
     timeline_list = [
-        {'timestamp': h, **data}
+        {'timestamp': h.strftime('%Y-%m-%d %H:00'), **data}
         for h, data in sorted(timeline_data.items())
     ]
 
@@ -1506,7 +1504,7 @@ def api_ufw_stats():
 
     # Timeline por hora
     timeline = db.session.query(
-        db.func.to_char(UfwEvent.timestamp, 'YYYY-MM-DD HH24:00').label('hour'),
+        db.func.date_trunc('hour', UfwEvent.timestamp).label('hour'),
         UfwEvent.action,
         db.func.count(UfwEvent.id)
     ).filter(
@@ -1521,7 +1519,7 @@ def api_ufw_stats():
         timeline_data[hour][action] = count
 
     timeline_list = [
-        {'timestamp': h, **data}
+        {'timestamp': h.strftime('%Y-%m-%d %H:00'), **data}
         for h, data in sorted(timeline_data.items())
     ]
 
@@ -1669,7 +1667,7 @@ def api_ufw_vpn_stats():
 
     # Timeline por hora (exitosas)
     timeline = db.session.query(
-        db.func.to_char(UfwEvent.timestamp, 'YYYY-MM-DD HH24:00').label('hour'),
+        db.func.date_trunc('hour', UfwEvent.timestamp).label('hour'),
         UfwEvent.dst_port,
         db.func.count(UfwEvent.id)
     ).filter(
@@ -1686,7 +1684,7 @@ def api_ufw_vpn_stats():
         timeline_data[hour][port] = count
 
     timeline_list = [
-        {'timestamp': h, **{port_names.get(p, str(p)): c for p, c in data.items()}}
+        {'timestamp': h.strftime('%Y-%m-%d %H:00'), **{port_names.get(p, str(p)): c for p, c in data.items()}}
         for h, data in sorted(timeline_data.items())
     ]
 

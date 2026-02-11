@@ -18,7 +18,7 @@ services:
       - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
       - AUTH_USER=${AUTH_USER:-admin}
       - AUTH_PASS=${AUTH_PASS:-change-me-in-production}
-      - DATABASE_URL=postgresql://monitor:${POSTGRES_PASSWORD:-change-me-in-production}@postgres:5432/monitor
+      - DATABASE_URL=postgresql+psycopg://monitor:${POSTGRES_PASSWORD:-change-me-in-production}@postgres:5432/monitor
       - MONITOR_SITES=${MONITOR_SITES:-}
       - MONITOR_APPS=${MONITOR_APPS:-}
       - MONITOR_SSH_PORTS=${MONITOR_SSH_PORTS:-}
@@ -47,7 +47,7 @@ services:
         max-file: "3"
 
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     container_name: nginx-monitor-postgres
     restart: unless-stopped
     volumes:

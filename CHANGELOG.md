@@ -2,6 +2,23 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [2.4.0] - 2026-02-11
+
+### Cambiado
+- **Python 3.13 → 3.14** - Imagen base actualizada a `python:3.14-slim`
+- **PostgreSQL 16 → 18** - Major version upgrade (backward-compatible)
+- **Gunicorn 23 → 25** - Fix request smuggling (v24+), mejoras de rendimiento
+- **psycopg2 → psycopg3** - Driver PostgreSQL mantenido activamente (`psycopg[binary]`)
+- **Dialect SQLAlchemy** - `postgresql+psycopg://` para detección automática de psycopg3
+
+### Mejorado
+- **Fix N+1 en sync_visits_internal** - Batch load de registros existentes en una query
+- **Fix N+1 en sync_fail2ban_internal** - Keys existentes cargadas en set
+- **Fix N+1 en sync_ufw_internal** - Keys existentes cargadas en set
+- **Fix N+1 en sync_ssh_auth_internal** - Keys existentes cargadas en set
+- **`DATE_TRUNC` en queries timeline** - Reemplaza `to_char` para mejor uso de índices (fail2ban, ufw, vpn)
+- **Pool de conexiones ampliado** - `pool_size=5`, `max_overflow=10`
+
 ## [2.3.0] - 2026-02-11
 
 ### Cambiado

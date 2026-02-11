@@ -213,17 +213,17 @@ El sistema categoriza automáticamente los bloqueos según el puerto atacado:
 
 ## Stack tecnológico
 
-- **Backend**: Python 3.13, Flask 3.1, Flask-SQLAlchemy, APScheduler, Gunicorn
+- **Backend**: Python 3.14, Flask 3.1, Flask-SQLAlchemy, APScheduler, Gunicorn 25
 - **Frontend**: HTML5, CSS3, JavaScript, Chart.js 4.4
-- **Base de datos**: PostgreSQL 16 (Alpine)
+- **Base de datos**: PostgreSQL 18 (Alpine), psycopg3
 - **Contenedor**: Docker con Python slim
 
 ## Servicios Docker
 
 | Servicio | Imagen | CPU | RAM | Descripción |
 |----------|--------|-----|-----|-------------|
-| nginx-monitor | python:3.13-slim | 1.0 | 512MB | Aplicación Flask |
-| postgres | postgres:16-alpine | 0.5 | 256MB | Base de datos |
+| nginx-monitor | python:3.14-slim | 1.0 | 512MB | Aplicación Flask |
+| postgres | postgres:18-alpine | 0.5 | 256MB | Base de datos |
 
 Ambos servicios tienen:
 - Healthchecks configurados
@@ -295,15 +295,18 @@ python app.py
 - ✅ Validación de parámetros de entrada (DoS prevention)
 - ✅ Headers de seguridad (X-Frame-Options, X-Content-Type-Options, etc.)
 
-### Rendimiento (v1.3.0)
-- ✅ Python 3.13 (mejor rendimiento y seguridad)
+### Rendimiento (v1.3.0 → v2.4.0)
+- ✅ Python 3.14 (upgrade desde 3.13), Gunicorn 25
 - ✅ 10 índices compuestos en base de datos
 - ✅ Dockerfile optimizado (non-root, healthcheck)
+- ✅ Fix N+1 en 4 funciones de sync (batch load)
+- ✅ `DATE_TRUNC` en queries timeline (mejor uso de índices)
 
-### Infraestructura (v2.0.0)
-- ✅ Migración a PostgreSQL 16 Alpine
-- ✅ Connection pooling configurado
-- ✅ 122,000+ registros migrados
+### Infraestructura (v2.0.0 → v2.4.0)
+- ✅ PostgreSQL 18 Alpine (upgrade desde 16)
+- ✅ psycopg3 (reemplaza psycopg2)
+- ✅ Connection pooling ampliado (pool_size=5, max_overflow=10)
+- ✅ 500,000+ registros en producción
 
 ### Estabilidad (v2.0.1)
 - ✅ Scheduler con coalescencia (sin ejecuciones solapadas)
