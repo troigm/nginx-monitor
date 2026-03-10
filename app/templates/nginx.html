@@ -82,13 +82,13 @@
 
 <!-- Charts Row 2: By App + Top IPs -->
 <div class="charts-row">
-    <div class="chart-card">
+    <div class="chart-card chart-card-fill">
         <h2>Visitas por Aplicacion</h2>
-        <div class="chart-container">
+        <div class="chart-container-fill">
             <canvas id="chartByApp"></canvas>
         </div>
     </div>
-    <div class="top-ips-card">
+    <div class="top-ips-card compact">
         <h2>Top IPs Bloqueadas (Nginx)</h2>
         <div id="topIps">
             <div class="loading">Cargando...</div>
@@ -137,13 +137,13 @@
 
 <!-- Fail2ban Top IPs -->
 <div class="charts-row">
-    <div class="top-ips-card">
+    <div class="top-ips-card compact">
         <h2>Top IPs Baneadas (Fail2Ban)</h2>
         <div id="topF2bBanned">
             <div class="loading">Cargando...</div>
         </div>
     </div>
-    <div class="top-ips-card">
+    <div class="top-ips-card compact">
         <h2>Top IPs por Intentos</h2>
         <div id="topF2bFounds">
             <div class="loading">Cargando...</div>

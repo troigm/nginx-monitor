@@ -2,6 +2,25 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [2.5.0] - 2026-03-10
+
+### Añadido
+- **Gráfica de ataques SSH por país** - Doughnut chart con top 12 países atacantes
+  - Nuevo campo `attack_ips_geo` en API `/api/ssh-auth-stats` (top 100 IPs atacantes)
+  - Resolución geográfica y agregación por país en frontend
+  - Tooltips con porcentaje y conteo absoluto
+
+### Mejorado
+- **Layout SSH compacto** - Cards de IPs y usuarios rediseñadas con clase `compact`
+  - Padding, fuentes e iconos reducidos para mayor densidad de información
+  - Sección IPs cambiada a layout de 3 columnas (Login Exitoso + Intentos Fallidos + Gráfica País)
+- **Layout UFW compacto** - Card "Top IPs Bloqueadas" con estilo compact
+- **Layout Nginx compacto** - Todas las cards de IPs con estilo compact
+- **Gráficas expandibles** - Nueva clase CSS `chart-card-fill` / `chart-container-fill`
+  - Gráfica "Categorías de Bloqueo" (UFW) ocupa 100% del card
+  - Gráfica "Visitas por Aplicación" (Nginx) ocupa 100% del card
+- **CSS responsive** - Soporte para grid de 3 columnas (`charts-row-3`) con breakpoints
+
 ## [2.4.0] - 2026-02-11
 
 ### Cambiado

@@ -1775,6 +1775,17 @@ def api_ssh_auth_stats():
         db.desc('count')
     ).limit(10).all()
 
+    # Top 100 IPs atacantes para gráfica de países
+    attack_ips_geo = db.session.query(
+        SshAuthEvent.src_ip,
+        db.func.count(SshAuthEvent.id).label('count')
+    ).filter(
+        SshAuthEvent.timestamp >= cutoff,
+        SshAuthEvent.event_type.in_(['failed', 'invalid_user', 'preauth_close', 'banner_error'])
+    ).group_by(SshAuthEvent.src_ip).order_by(
+        db.desc('count')
+    ).limit(100).all()
+
     # Top usuarios con login exitoso
     top_users_accepted = db.session.query(
         SshAuthEvent.username,
@@ -1820,6 +1831,7 @@ def api_ssh_auth_stats():
         'by_type': [{'type': t, 'count': c} for t, c in by_type],
         'top_ips_accepted': [{'ip': ip, 'count': c, 'last_seen': ls.isoformat() if ls else None} for ip, c, ls in top_ips_accepted],
         'top_ips_failed': [{'ip': ip, 'count': c, 'last_seen': ls.isoformat() if ls else None} for ip, c, ls in top_ips_failed],
+        'attack_ips_geo': [{'ip': ip, 'count': c} for ip, c in attack_ips_geo],
         'top_users_accepted': [{'username': u, 'count': c} for u, c in top_users_accepted],
         'top_users_failed': [{'username': u, 'count': c} for u, c in top_users_failed],
         'recent_accepted': [{

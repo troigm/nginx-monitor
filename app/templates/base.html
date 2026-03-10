@@ -130,6 +130,16 @@
             position: relative;
             height: 280px;
         }
+        .chart-card-fill {
+            display: flex;
+            flex-direction: column;
+        }
+        .chart-card-fill h2 { margin-bottom: 10px; }
+        .chart-container-fill {
+            position: relative;
+            flex: 1;
+            min-height: 0;
+        }
 
         /* Two columns for smaller charts */
         .charts-row {
@@ -138,9 +148,25 @@
             gap: 20px;
             margin-bottom: 25px;
         }
-        .charts-row .chart-container {
+        .charts-row-3 {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 25px;
+        }
+        .charts-row .chart-container,
+        .charts-row-3 .chart-container {
             height: 220px;
         }
+
+        /* Compact IP rows for SSH section */
+        .top-ips-card.compact .ip-row {
+            padding: 7px 0;
+        }
+        .top-ips-card.compact .ip-flag { font-size: 1.2em; }
+        .top-ips-card.compact .ip-address { font-size: 0.85em; }
+        .top-ips-card.compact .ip-country { font-size: 0.72em; }
+        .top-ips-card.compact .ip-count { padding: 3px 9px; font-size: 0.8em; }
 
         /* Top IPs */
         .top-ips-card {
@@ -303,11 +329,13 @@
             .stats-grid { grid-template-columns: repeat(3, 1fr); }
             .stats-grid-4 { grid-template-columns: repeat(2, 1fr); }
             .charts-grid { grid-template-columns: 1fr; }
+            .charts-row-3 { grid-template-columns: 1fr 1fr; }
         }
         @media (max-width: 768px) {
             .stats-grid { grid-template-columns: repeat(2, 1fr); }
             .stats-grid-4 { grid-template-columns: repeat(2, 1fr); }
             .charts-row { grid-template-columns: 1fr; }
+            .charts-row-3 { grid-template-columns: 1fr; }
             .filters { flex-direction: column; align-items: stretch; }
             .main-nav { flex-wrap: wrap; }
             table { font-size: 0.85em; }

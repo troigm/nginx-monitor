@@ -15,7 +15,8 @@ Dashboard de monitoreo de seguridad y tráfico web para servidores con Nginx, Fa
 ### Página SSH/VPN
 - **Autenticación SSH real**: Logins exitosos y fallidos desde `/var/log/auth.log`
 - **Detección de scanners/bots**: Identificación de intentos automatizados
-- **Top IPs y usuarios**: Estadísticas de acceso y ataques
+- **Top IPs y usuarios**: Estadísticas de acceso y ataques (layout compacto)
+- **Gráfica de ataques por país**: Doughnut chart con top 12 países atacantes
 - **Tabla de eventos SSH**: Ordenable, filtrable por tipo/usuario/IP y paginada
 
 ### Página UFW Firewall
@@ -328,6 +329,12 @@ python app.py
 - ✅ Filtro por IP en todas las tablas de eventos
 - ✅ Controles de navegación (anterior/siguiente/indicador)
 - ✅ Estructura de respuesta API unificada con metadata
+
+### UI/UX (v2.5.0)
+- ✅ Gráfica de ataques SSH por país (doughnut chart, top 12 países)
+- ✅ Layout compacto en todas las cards de IPs y usuarios
+- ✅ Gráficas expandibles que ocupan el 100% del card disponible
+- ✅ Layout responsive de 3 columnas en sección SSH
 
 ## Uso de IP Lists
 

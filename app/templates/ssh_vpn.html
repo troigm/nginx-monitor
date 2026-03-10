@@ -27,31 +27,37 @@
     </div>
 </div>
 
-<!-- SSH Auth IPs and Recent -->
-<div class="charts-row">
-    <div class="top-ips-card">
+<!-- SSH Auth IPs and Country Chart -->
+<div class="charts-row-3">
+    <div class="top-ips-card compact">
         <h2 style="color: #27ae60;">IPs con Login Exitoso</h2>
         <div id="topSshIpsAccepted">
             <div class="loading">Cargando...</div>
         </div>
     </div>
-    <div class="top-ips-card">
+    <div class="top-ips-card compact">
         <h2 style="color: #e74c3c;">IPs con Intentos Fallidos</h2>
         <div id="topSshIpsFailed">
             <div class="loading">Cargando...</div>
+        </div>
+    </div>
+    <div class="top-ips-card">
+        <h2 style="color: #e74c3c;">Ataques por Pais</h2>
+        <div class="chart-container">
+            <canvas id="chartAttacksByCountry"></canvas>
         </div>
     </div>
 </div>
 
 <!-- SSH Auth Users -->
 <div class="charts-row">
-    <div class="top-ips-card">
+    <div class="top-ips-card compact">
         <h2 style="color: #27ae60;">Usuarios con Login Exitoso</h2>
         <div id="topSshUsersAccepted">
             <div class="loading">Cargando...</div>
         </div>
     </div>
-    <div class="top-ips-card">
+    <div class="top-ips-card compact">
         <h2 style="color: #e74c3c;">Usuarios Atacados (Fallidos)</h2>
         <div id="topSshUsersFailed">
             <div class="loading">Cargando...</div>
@@ -264,6 +270,66 @@
                 `).join('');
             } else {
                 document.getElementById('topSshUsersFailed').innerHTML = '<div class="empty">Sin usuarios atacados</div>';
+            }
+
+            // Gráfica de ataques por país
+            if (data.attack_ips_geo && data.attack_ips_geo.length > 0) {
+                const attackIps = data.attack_ips_geo.map(item => item.ip);
+                await getGeoInfoBatch(attackIps);
+
+                // Agregar por país
+                const countryMap = {};
+                data.attack_ips_geo.forEach(item => {
+                    const geo = geoCache[item.ip] || { country: 'Desconocido', flag: '' };
+                    const key = geo.country || 'Desconocido';
+                    if (!countryMap[key]) countryMap[key] = { count: 0, flag: geo.flag };
+                    countryMap[key].count += item.count;
+                });
+
+                const sorted = Object.entries(countryMap)
+                    .sort((a, b) => b[1].count - a[1].count)
+                    .slice(0, 12);
+
+                const labels = sorted.map(([c, d]) => `${d.flag} ${c}`);
+                const values = sorted.map(([, d]) => d.count);
+                const colors = [
+                    '#e74c3c', '#e67e22', '#f1c40f', '#2ecc71', '#1abc9c', '#3498db',
+                    '#9b59b6', '#e91e63', '#00bcd4', '#ff7043', '#8d6e63', '#78909c'
+                ];
+
+                if (charts.attacksByCountry) charts.attacksByCountry.destroy();
+                const ctx = document.getElementById('chartAttacksByCountry').getContext('2d');
+                charts.attacksByCountry = new Chart(ctx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            data: values,
+                            backgroundColor: colors.slice(0, values.length),
+                            borderColor: '#1a1a2e',
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'right',
+                                labels: { color: '#ccc', font: { size: 11 }, padding: 8, boxWidth: 12 }
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(ctx) {
+                                        const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+                                        const pct = ((ctx.parsed / total) * 100).toFixed(1);
+                                        return ` ${ctx.label}: ${ctx.parsed.toLocaleString()} (${pct}%)`;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
             }
 
         } catch (e) {
