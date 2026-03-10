@@ -1885,6 +1885,45 @@ def api_ssh_auth_events():
         }
     })
 
+@app.route('/api/permanent-blacklist')
+@requires_auth
+def api_permanent_blacklist():
+    """API para listado de IPs en blacklist permanente"""
+    blacklist_path = '/etc/fail2ban/ip.blacklist'
+    ips = []
+    try:
+        with open(blacklist_path, 'r') as f:
+            ips = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+    except FileNotFoundError:
+        return jsonify({'data': [], 'total': 0})
+
+    if not ips:
+        return jsonify({'data': [], 'total': 0})
+
+    # Enriquecer con datos de la BD: último ataque y total de intentos
+    stats = db.session.query(
+        SshAuthEvent.src_ip,
+        db.func.count(SshAuthEvent.id).label('attempts'),
+        db.func.max(SshAuthEvent.timestamp).label('last_seen')
+    ).filter(
+        SshAuthEvent.src_ip.in_(ips),
+        SshAuthEvent.event_type.in_(['failed', 'invalid_user', 'preauth_close', 'banner_error'])
+    ).group_by(SshAuthEvent.src_ip).all()
+
+    stats_map = {s.src_ip: {'attempts': s.attempts, 'last_seen': s.last_seen} for s in stats}
+
+    data = []
+    for ip in ips:
+        info = stats_map.get(ip, {})
+        data.append({
+            'ip': ip,
+            'attempts': info.get('attempts', 0),
+            'last_seen': info['last_seen'].isoformat() if info.get('last_seen') else None
+        })
+
+    data.sort(key=lambda x: x['attempts'], reverse=True)
+    return jsonify({'data': data, 'total': len(data)})
+
 # ==================== RUTAS WEB ====================
 
 @app.route('/')

@@ -65,12 +65,16 @@
     </div>
 </div>
 
-<!-- ========== SSH EVENTS TABLE ========== -->
+<!-- ========== SSH EVENTS TABS ========== -->
 <div class="section-divider"></div>
 
-<h3>Registro de Eventos SSH</h3>
+<div class="tabs">
+    <button class="tab active" onclick="showSshTab('events')">Registro de Eventos SSH</button>
+    <button class="tab" onclick="showSshTab('blacklist')">IPs Baneadas Permanentemente</button>
+</div>
 
-<div class="table-container" style="border-radius: 12px;">
+<!-- SSH Events Table -->
+<div id="tabSshEvents" class="table-container">
     <div class="table-filters">
         <label>Tipo:</label>
         <select id="filterSshType" onchange="applyTableFilters()">
@@ -107,13 +111,44 @@
         </tbody>
     </table>
 </div>
+
+<!-- Permanent Blacklist Table -->
+<div id="tabBlacklist" class="table-container" style="display:none;">
+    <div class="table-filters">
+        <label>Buscar IP:</label>
+        <input type="text" id="filterBlacklistIp" placeholder="Filtrar por IP..." oninput="applyBlacklistFilter()" style="padding: 6px 10px; font-size: 0.85em; background: #1a1a2e; border: 1px solid #333; border-radius: 6px; color: #eee; width: 180px;">
+        <span class="filter-count" id="blacklistCount"></span>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th class="sortable" onclick="sortBlacklist('ip', 'string')">IP</th>
+                <th class="sortable" onclick="sortBlacklist('country', 'string')">Pais</th>
+                <th class="sortable desc" onclick="sortBlacklist('attempts', 'number')">Intentos SSH</th>
+                <th class="sortable" onclick="sortBlacklist('last_seen', 'date')">Ultimo Ataque</th>
+            </tr>
+        </thead>
+        <tbody id="blacklistTableBody">
+            <tr><td colspan="4" class="loading">Cargando...</td></tr>
+        </tbody>
+    </table>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
     let tableData = [];
+    let blacklistData = [];
     let paginationState = { page: 1, totalPages: 1, totalRecords: 0 };
     let sortState = { field: 'timestamp', direction: 'desc' };
+
+    function showSshTab(tab) {
+        document.querySelectorAll('.tabs .tab').forEach(t => t.classList.remove('active'));
+        document.querySelector(`.tab[onclick="showSshTab('${tab}')"]`).classList.add('active');
+        document.getElementById('tabSshEvents').style.display = tab === 'events' ? 'block' : 'none';
+        document.getElementById('tabBlacklist').style.display = tab === 'blacklist' ? 'block' : 'none';
+        if (tab === 'blacklist' && blacklistData.length === 0) loadBlacklist();
+    }
 
     function getSshEventBadge(eventType) {
         const badges = {
@@ -362,6 +397,78 @@
         } catch (e) {
             console.error('Error loading SSH auth events:', e);
         }
+    }
+
+    let blacklistSort = { field: 'attempts', direction: 'desc' };
+
+    function sortBlacklist(field, type) {
+        if (blacklistSort.field === field) {
+            blacklistSort.direction = blacklistSort.direction === 'asc' ? 'desc' : 'asc';
+        } else {
+            blacklistSort.field = field;
+            blacklistSort.direction = 'desc';
+        }
+        document.querySelectorAll('#tabBlacklist th.sortable').forEach(h => h.classList.remove('asc', 'desc'));
+        event.currentTarget.classList.add(blacklistSort.direction);
+        applyBlacklistFilter();
+    }
+
+    async function loadBlacklist() {
+        try {
+            const res = await apiFetch(`${basePath}/api/permanent-blacklist`);
+            const response = await res.json();
+            blacklistData = response.data || [];
+
+            const ips = blacklistData.map(r => r.ip);
+            // Resolve geo in batches of 100
+            for (let i = 0; i < ips.length; i += 100) {
+                await getGeoInfoBatch(ips.slice(i, i + 100));
+            }
+
+            applyBlacklistFilter();
+        } catch (e) {
+            console.error('Error loading blacklist:', e);
+        }
+    }
+
+    function applyBlacklistFilter() {
+        const filter = (document.getElementById('filterBlacklistIp').value || '').trim().toLowerCase();
+        let data = blacklistData.map(r => {
+            const geo = geoCache[r.ip] || { flag: '', country: 'Desconocido' };
+            return { ...r, country: geo.country, flag: geo.flag };
+        });
+        if (filter) data = data.filter(r => r.ip.includes(filter) || r.country.toLowerCase().includes(filter));
+
+        const { field, direction } = blacklistSort;
+        data.sort((a, b) => {
+            let valA = a[field], valB = b[field];
+            if (field === 'last_seen') { valA = valA ? new Date(valA).getTime() : 0; valB = valB ? new Date(valB).getTime() : 0; }
+            else if (field === 'attempts') { valA = valA || 0; valB = valB || 0; }
+            else { valA = (valA || '').toString().toLowerCase(); valB = (valB || '').toString().toLowerCase(); }
+            if (valA < valB) return direction === 'asc' ? -1 : 1;
+            if (valA > valB) return direction === 'asc' ? 1 : -1;
+            return 0;
+        });
+
+        const tbody = document.getElementById('blacklistTableBody');
+        document.getElementById('blacklistCount').textContent = `${data.length} IPs baneadas`;
+
+        if (data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="empty">No hay IPs en la blacklist permanente</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = data.map(r => {
+            const lastSeen = r.last_seen ? formatDate(r.last_seen) : '<span style="color:#666">-</span>';
+            return `
+                <tr>
+                    <td class="mono">${r.ip}</td>
+                    <td>${r.flag} ${r.country}</td>
+                    <td style="text-align:center"><span class="ip-count" style="background: linear-gradient(135deg, #e74c3c, #c0392b);">${r.attempts}</span></td>
+                    <td class="mono">${lastSeen}</td>
+                </tr>
+            `;
+        }).join('');
     }
 
     async function loadPageData() {

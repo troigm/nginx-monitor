@@ -2,6 +2,18 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [2.6.0] - 2026-03-10
+
+### Añadido
+- **Tab "IPs Baneadas Permanentemente"** en sección SSH/VPN
+  - Nuevo endpoint `/api/permanent-blacklist` que lee `/etc/fail2ban/ip.blacklist`
+  - Enriquecido con intentos SSH y fecha de último ataque desde base de datos
+  - Tabla ordenable por IP, País, Intentos SSH y Último Ataque
+  - Filtro por IP y por nombre de país
+  - Geolocalización en batches de 100 IPs
+  - Carga lazy al hacer click en la tab
+- **Volumen Docker** para `/etc/fail2ban/ip.blacklist` (read-only)
+
 ## [2.5.0] - 2026-03-10
 
 ### Añadido

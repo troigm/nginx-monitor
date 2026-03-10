@@ -17,6 +17,7 @@ Dashboard de monitoreo de seguridad y tráfico web para servidores con Nginx, Fa
 - **Detección de scanners/bots**: Identificación de intentos automatizados
 - **Top IPs y usuarios**: Estadísticas de acceso y ataques (layout compacto)
 - **Gráfica de ataques por país**: Doughnut chart con top 12 países atacantes
+- **IPs baneadas permanentemente**: Tab con listado ordenable desde `/etc/fail2ban/ip.blacklist`
 - **Tabla de eventos SSH**: Ordenable, filtrable por tipo/usuario/IP y paginada
 
 ### Página UFW Firewall
@@ -154,6 +155,7 @@ El endpoint `/csp-report` no requiere autenticación para permitir reportes del 
 | `/api/fail2ban-events` | GET | Eventos Fail2Ban |
 | `/api/ssh-auth-stats` | GET | Estadísticas autenticación SSH |
 | `/api/ssh-auth-events` | GET | Eventos de autenticación SSH |
+| `/api/permanent-blacklist` | GET | IPs baneadas permanentemente (fail2ban) |
 | `/api/ufw-stats` | GET | Estadísticas UFW |
 | `/api/ufw-events` | GET | Eventos UFW |
 | `/api/geoip` | POST | Geolocalización de IPs |
@@ -330,11 +332,12 @@ python app.py
 - ✅ Controles de navegación (anterior/siguiente/indicador)
 - ✅ Estructura de respuesta API unificada con metadata
 
-### UI/UX (v2.5.0)
+### UI/UX (v2.5.0 → v2.6.0)
 - ✅ Gráfica de ataques SSH por país (doughnut chart, top 12 países)
 - ✅ Layout compacto en todas las cards de IPs y usuarios
 - ✅ Gráficas expandibles que ocupan el 100% del card disponible
 - ✅ Layout responsive de 3 columnas en sección SSH
+- ✅ Tab "IPs Baneadas Permanentemente" con tabla ordenable y filtro por IP/país
 
 ## Uso de IP Lists
 
