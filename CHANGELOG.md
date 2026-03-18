@@ -2,6 +2,31 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [2.7.0] - 2026-03-18
+
+### Añadido
+- **Soporte multi-vhost** - Parseo independiente de logs por virtual host
+  - `MONITOR_LOG_MAP`: mapeo de site a prefijo de log Nginx (`site:prefix`)
+  - `MONITOR_SITE_APP`: mapeo directo de site a app (`site:app_slug`)
+  - Cutoff por site: sincronización independiente por cada virtual host
+- **Lectura de logs rotados** - Parseo automático de archivos `.log.1` (logrotate)
+  - Access logs y error logs rotados incluidos en sincronización
+  - Visit stats también incluyen logs rotados
+- **Parseo de access log completo** - Captura todos los status codes, no solo errores
+  - Nuevos tipos: `access` (2xx/3xx), `http_4xx`, `http_5xx`
+  - Filtrado de bots, IPs internas y recursos estáticos
+  - Líneas de lectura aumentadas a 5000 (antes 1000)
+
+### Mejorado
+- **`detect_app()` con contexto de site** - Mapeo directo `MONITOR_SITE_APP` antes de detección por URI
+- **Mensajes de error** incluyen la ruta del log que falló
+- **Badges CSS** para nuevos tipos de log: `access`, `http_4xx`, `http_5xx`
+- **Docker Compose** actualizado con variables `MONITOR_LOG_MAP` y `MONITOR_SITE_APP`
+
+### Nuevas variables de entorno
+- `MONITOR_LOG_MAP`: Mapeo site→prefijo de log (`blog.example.com:blog`)
+- `MONITOR_SITE_APP`: Mapeo site→app (`shop.example.com:woocommerce`)
+
 ## [2.6.0] - 2026-03-10
 
 ### Añadido

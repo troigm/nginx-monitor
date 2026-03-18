@@ -39,6 +39,8 @@ Dashboard de monitoreo de seguridad y tráfico web para servidores con Nginx, Fa
 - **Geolocalización de IPs**: Integración con ip-api.com
 - **Dashboard interactivo**: Gráficas con Chart.js, filtros, ordenación
 - **Limpieza automática**: Retención de 3 meses de datos
+- **Multi-vhost**: Parseo independiente de logs por virtual host con cutoff por site
+- **Logs rotados**: Lectura automática de logs `.log.1` (logrotate)
 
 ## Arquitectura
 
@@ -106,8 +108,28 @@ http://localhost:5000
 | `DATABASE_URL` | URL de conexión BD | `postgresql://monitor:...@postgres:5432/monitor` |
 | `MONITOR_SITES` | Dominios a monitorizar (comas) | `example.com` |
 | `MONITOR_APPS` | Apps web `slug:Label` (comas) | `wordpress:WordPress` |
+| `MONITOR_LOG_MAP` | Mapeo site a prefijo de log `site:prefix` (comas) | _(vacío)_ |
+| `MONITOR_SITE_APP` | Mapeo site a app `site:app_slug` (comas) | _(vacío)_ |
 | `MONITOR_SSH_PORTS` | Puertos SSH para UFW (comas) | `22,2222` |
 | `MONITOR_VPN_PORTS` | Puertos VPN `puerto:Nombre` (comas) | `22:SSH,1194:OpenVPN,51820:WireGuard` |
+
+### Multi-vhost (múltiples sitios)
+
+Si tu Nginx tiene virtual hosts con logs separados (ej. `blog_access.log`, `shop_access.log`), usa `MONITOR_LOG_MAP` para mapear cada site a su prefijo de log:
+
+```bash
+# .env
+MONITOR_SITES=blog.example.com,shop.example.com
+MONITOR_LOG_MAP=blog.example.com:blog,shop.example.com:shop
+```
+
+Esto hará que nginx-monitor parsee `/var/log/nginx/blog_access.log`, `blog_error.log`, `shop_access.log`, `shop_error.log` (y sus versiones rotadas `.log.1`).
+
+Opcionalmente, mapea sites directamente a apps con `MONITOR_SITE_APP`:
+
+```bash
+MONITOR_SITE_APP=shop.example.com:woocommerce
+```
 
 ### Configuración con Nginx Proxy
 
@@ -338,6 +360,13 @@ python app.py
 - ✅ Gráficas expandibles que ocupan el 100% del card disponible
 - ✅ Layout responsive de 3 columnas en sección SSH
 - ✅ Tab "IPs Baneadas Permanentemente" con tabla ordenable y filtro por IP/país
+
+### Multi-vhost y parseo mejorado (v2.7.0)
+- ✅ Soporte multi-vhost con `MONITOR_LOG_MAP` y `MONITOR_SITE_APP`
+- ✅ Lectura automática de logs rotados (`.log.1`)
+- ✅ Cutoff por site (sincronización independiente por virtual host)
+- ✅ Parseo de access log completo (todos los status codes, filtro de bots/estáticos/IPs internas)
+- ✅ Clasificación mejorada: `access`, `http_4xx`, `http_5xx`, `bad_bot`, `http_429`
 
 ## Uso de IP Lists
 

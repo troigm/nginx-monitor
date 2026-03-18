@@ -47,6 +47,25 @@ for _entry in _raw_apps.split(','):
     MONITOR_APPS.append({'slug': _parts[0], 'label': _parts[1] if len(_parts) > 1 else _parts[0]})
 DEFAULT_APP = MONITOR_APPS[0]['slug']
 
+# Mapeo de sites a prefijos de log de Nginx (formato: site:prefix,site2:prefix2)
+# Si no se define, se intenta derivar automáticamente del nombre del site
+_raw_log_map = os.environ.get('MONITOR_LOG_MAP', '')
+MONITOR_LOG_MAP = {}
+if _raw_log_map:
+    for _entry in _raw_log_map.split(','):
+        _parts = _entry.strip().split(':', 1)
+        if len(_parts) == 2:
+            MONITOR_LOG_MAP[_parts[0].strip()] = _parts[1].strip()
+
+# Mapeo de sites a apps (formato: site:app_slug,site2:app_slug2)
+_raw_site_app = os.environ.get('MONITOR_SITE_APP', '')
+MONITOR_SITE_APP = {}
+if _raw_site_app:
+    for _entry in _raw_site_app.split(','):
+        _parts = _entry.strip().split(':', 1)
+        if len(_parts) == 2:
+            MONITOR_SITE_APP[_parts[0].strip()] = _parts[1].strip()
+
 # Puertos SSH configurables
 MONITOR_SSH_PORTS = {int(p) for p in os.environ.get('MONITOR_SSH_PORTS', '22,2222').split(',') if p.strip()}
 
@@ -236,8 +255,12 @@ def is_internal_ip(ip):
         return True
     return any(ip.startswith(prefix) for prefix in INTERNAL_IP_PREFIXES)
 
-def detect_app(uri):
-    """Detecta la app basándose en la URI"""
+def detect_app(uri, site=None):
+    """Detecta la app basándose en el site (si mapeado) o en la URI"""
+    # Primero: mapeo directo site → app
+    if site and site in MONITOR_SITE_APP:
+        return MONITOR_SITE_APP[site]
+    # Segundo: detección por URI
     if uri:
         for app_conf in MONITOR_APPS[1:]:  # Skip default (first) app
             if f'/{app_conf["slug"]}' in uri:
@@ -254,7 +277,7 @@ def detect_site(server_name):
 
 # ==================== PARSEO DE LOGS ====================
 
-def parse_nginx_error_log(log_path='/var/log/nginx/error.log', last_lines=1000):
+def parse_nginx_error_log(log_path='/var/log/nginx/error.log', last_lines=1000, site_override=None):
     """Parsea el log de errores de nginx"""
     if not os.path.exists(log_path):
         return []
@@ -284,10 +307,11 @@ def parse_nginx_error_log(log_path='/var/log/nginx/error.log', last_lines=1000):
                     except:
                         timestamp = datetime.utcnow()
 
+                    _site = site_override or detect_site(server)
                     entries.append({
                         'timestamp': timestamp,
-                        'site': detect_site(server),
-                        'app': detect_app(uri),
+                        'site': _site,
+                        'app': detect_app(uri, site=_site),
                         'log_type': log_type,
                         'client_ip': client_ip,
                         'request_uri': uri,
@@ -296,12 +320,14 @@ def parse_nginx_error_log(log_path='/var/log/nginx/error.log', last_lines=1000):
                     })
                     break
     except Exception as e:
-        app.logger.error(f"Error parsing error log: {e}")
+        app.logger.error(f"Error parsing error log {log_path}: {e}")
 
     return entries
 
-def parse_nginx_access_log(log_path='/var/log/nginx/access.log', last_lines=1000):
-    """Parsea el log de acceso de nginx buscando 444, 429, 403, etc."""
+STATIC_EXTENSIONS = {'.css', '.js', '.png', '.jpg', '.jpeg', '.gif', '.ico', '.woff', '.woff2', '.ttf', '.svg', '.webp', '.map', '.webmanifest'}
+
+def parse_nginx_access_log(log_path='/var/log/nginx/access.log', last_lines=5000, site_override=None):
+    """Parsea el log de acceso de nginx: peticiones reales (no bots, no estáticos)"""
     if not os.path.exists(log_path):
         return []
 
@@ -310,6 +336,8 @@ def parse_nginx_access_log(log_path='/var/log/nginx/access.log', last_lines=1000
     pattern = re.compile(
         r'([\d\.]+) - [^ ]+ \[([^\]]+)\] "(\w+) ([^"]*) [^"]*" (\d{3}) \d+ "[^"]*" "([^"]*)"'
     )
+
+    site = site_override or DEFAULT_SITE
 
     try:
         with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -321,34 +349,54 @@ def parse_nginx_access_log(log_path='/var/log/nginx/access.log', last_lines=1000
                 client_ip, ts_str, method, uri, status, user_agent = match.groups()
                 status = int(status)
 
-                # Solo guardar códigos de error relevantes
-                if status in [403, 404, 429, 444, 500, 502, 503]:
-                    try:
-                        timestamp = datetime.strptime(ts_str, '%d/%b/%Y:%H:%M:%S %z')
-                        timestamp = timestamp.replace(tzinfo=None)
-                    except:
-                        timestamp = datetime.utcnow()
+                # Excluir bots
+                if is_bot(user_agent):
+                    continue
 
-                    log_type = 'bad_bot' if status == 444 else f'http_{status}'
+                # Excluir IPs internas
+                if is_internal_ip(client_ip):
+                    continue
 
-                    entries.append({
-                        'timestamp': timestamp,
-                        'site': DEFAULT_SITE,
-                        'app': detect_app(uri),
-                        'log_type': log_type,
-                        'client_ip': client_ip,
-                        'request_uri': uri,
-                        'status_code': status,
-                        'user_agent': user_agent[:500] if user_agent else None,
-                        'message': f'{method} {uri} -> {status}',
-                        'raw_line': line.strip()
-                    })
+                # Excluir recursos estáticos
+                if any(uri.endswith(ext) for ext in STATIC_EXTENSIONS):
+                    continue
+
+                try:
+                    timestamp = datetime.strptime(ts_str, '%d/%b/%Y:%H:%M:%S %z')
+                    timestamp = timestamp.replace(tzinfo=None)
+                except:
+                    timestamp = datetime.utcnow()
+
+                # Clasificar por status code
+                if status == 444:
+                    log_type = 'bad_bot'
+                elif status == 429:
+                    log_type = 'http_429'
+                elif 400 <= status < 500:
+                    log_type = 'http_4xx'
+                elif status >= 500:
+                    log_type = 'http_5xx'
+                else:
+                    log_type = 'access'
+
+                entries.append({
+                    'timestamp': timestamp,
+                    'site': site,
+                    'app': detect_app(uri, site=site),
+                    'log_type': log_type,
+                    'client_ip': client_ip,
+                    'request_uri': uri,
+                    'status_code': status,
+                    'user_agent': user_agent[:500] if user_agent else None,
+                    'message': f'{method} {uri} -> {status}',
+                    'raw_line': line.strip()
+                })
     except Exception as e:
-        app.logger.error(f"Error parsing access log: {e}")
+        app.logger.error(f"Error parsing access log {log_path}: {e}")
 
     return entries
 
-def parse_visits_from_access_log(log_path='/var/log/nginx/access.log', last_lines=5000):
+def parse_visits_from_access_log(log_path='/var/log/nginx/access.log', last_lines=5000, site_override=None):
     """Parsea el access log para contar visitas reales (excluyendo bots)"""
     if not os.path.exists(log_path):
         return {}
@@ -398,13 +446,16 @@ def parse_visits_from_access_log(log_path='/var/log/nginx/access.log', last_line
                 continue
 
             # Detectar site y app
-            site = DEFAULT_SITE
-            for _s in MONITOR_SITES[1:]:
-                if _s in referer:
-                    site = _s
-                    break
+            if site_override:
+                site = site_override
+            else:
+                site = DEFAULT_SITE
+                for _s in MONITOR_SITES[1:]:
+                    if _s in referer:
+                        site = _s
+                        break
 
-            app_name = detect_app(uri)
+            app_name = detect_app(uri, site=site)
 
             # Acumular stats
             key = (hour_ts, site, app_name)
@@ -414,13 +465,49 @@ def parse_visits_from_access_log(log_path='/var/log/nginx/access.log', last_line
             stats[key]['ips'].add(client_ip)
 
     except Exception as e:
-        app.logger.error(f"Error parsing visits: {e}")
+        app.logger.error(f"Error parsing visits {log_path}: {e}")
 
     return stats
 
+def _get_all_log_files():
+    """Devuelve lista de (log_prefix, site) para todos los vhosts mapeados"""
+    result = []
+    for site, prefix in MONITOR_LOG_MAP.items():
+        result.append((prefix, site))
+    return result
+
+def _get_log_paths(prefix, log_type):
+    """Devuelve lista de paths de log existentes (actual + .1 rotado)"""
+    paths = []
+    for suffix in ['', '.1']:
+        path = f'/var/log/nginx/{prefix}_{log_type}.log{suffix}'
+        if os.path.exists(path):
+            paths.append(path)
+    return paths
+
 def sync_visits_internal():
     """Sincroniza las visitas a la base de datos (sin app_context)"""
+    # Parsear log por defecto (actual + rotado)
     visit_data = parse_visits_from_access_log()
+    if os.path.exists('/var/log/nginx/access.log.1'):
+        for key, data in parse_visits_from_access_log(log_path='/var/log/nginx/access.log.1').items():
+            if key in visit_data:
+                visit_data[key]['visits'] += data['visits']
+                visit_data[key]['ips'].update(data['ips'])
+            else:
+                visit_data[key] = data
+
+    # Parsear logs de cada vhost mapeado (actual + rotado)
+    for prefix, site in _get_all_log_files():
+        for log_path in _get_log_paths(prefix, 'access'):
+            site_visits = parse_visits_from_access_log(log_path=log_path, site_override=site)
+            for key, data in site_visits.items():
+                if key in visit_data:
+                    visit_data[key]['visits'] += data['visits']
+                    visit_data[key]['ips'].update(data['ips'])
+                else:
+                    visit_data[key] = data
+
     if not visit_data:
         return
 
@@ -774,30 +861,51 @@ def sync_ssh_auth_internal():
         db.session.rollback()
         app.logger.error(f"Error syncing SSH auth: {e}")
 
+def _get_site_cutoff(site):
+    """Obtiene el cutoff por site (último log de ESE site)"""
+    last_log = NginxLog.query.filter(NginxLog.site == site).order_by(NginxLog.timestamp.desc()).first()
+    return last_log.timestamp if last_log else datetime.utcnow() - timedelta(days=2)
+
 def sync_logs():
     """Sincroniza los logs de nginx a la base de datos"""
     with app.app_context():
-        # Obtener timestamp del último log
-        last_log = NginxLog.query.order_by(NginxLog.timestamp.desc()).first()
-        cutoff = last_log.timestamp if last_log else datetime.utcnow() - timedelta(days=1)
+        total_entries = 0
 
-        # Parsear logs de error
-        error_entries = parse_nginx_error_log()
-        for entry in error_entries:
-            if entry['timestamp'] > cutoff:
-                log = NginxLog(**entry)
-                db.session.add(log)
+        # Cutoff para log por defecto (DEFAULT_SITE)
+        default_cutoff = _get_site_cutoff(DEFAULT_SITE)
 
-        # Parsear logs de acceso
-        access_entries = parse_nginx_access_log()
-        for entry in access_entries:
-            if entry['timestamp'] > cutoff:
-                log = NginxLog(**entry)
-                db.session.add(log)
+        # Parsear logs por defecto (actual + rotado)
+        for log_path in ['/var/log/nginx/error.log', '/var/log/nginx/error.log.1']:
+            for entry in parse_nginx_error_log(log_path=log_path):
+                if entry['timestamp'] > default_cutoff:
+                    db.session.add(NginxLog(**entry))
+                    total_entries += 1
+
+        for log_path in ['/var/log/nginx/access.log', '/var/log/nginx/access.log.1']:
+            for entry in parse_nginx_access_log(log_path=log_path):
+                if entry['timestamp'] > default_cutoff:
+                    db.session.add(NginxLog(**entry))
+                    total_entries += 1
+
+        # Parsear logs de cada vhost mapeado (cutoff por site)
+        for prefix, site in _get_all_log_files():
+            cutoff = _get_site_cutoff(site)
+
+            for error_path in _get_log_paths(prefix, 'error'):
+                for entry in parse_nginx_error_log(log_path=error_path, site_override=site):
+                    if entry['timestamp'] > cutoff:
+                        db.session.add(NginxLog(**entry))
+                        total_entries += 1
+
+            for access_path in _get_log_paths(prefix, 'access'):
+                for entry in parse_nginx_access_log(log_path=access_path, site_override=site):
+                    if entry['timestamp'] > cutoff:
+                        db.session.add(NginxLog(**entry))
+                        total_entries += 1
 
         try:
             db.session.commit()
-            app.logger.info(f"Synced {len(error_entries) + len(access_entries)} log entries")
+            app.logger.info(f"Synced {total_entries} log entries from {len(MONITOR_LOG_MAP) + 1} sources")
         except Exception as e:
             db.session.rollback()
             app.logger.error(f"Error syncing logs: {e}")
@@ -830,7 +938,7 @@ def csp_report():
         # Detectar site y app
         document_uri = report.get('document-uri', '')
         site = detect_site(document_uri)
-        app_name = detect_app(document_uri)
+        app_name = detect_app(document_uri, site=site)
 
         csp = CSPReport(
             site=site,

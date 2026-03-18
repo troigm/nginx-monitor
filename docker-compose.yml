@@ -22,6 +22,8 @@ services:
       - DATABASE_URL=postgresql+psycopg://monitor:${POSTGRES_PASSWORD:-change-me-in-production}@postgres:5432/monitor
       - MONITOR_SITES=${MONITOR_SITES:-}
       - MONITOR_APPS=${MONITOR_APPS:-}
+      - MONITOR_LOG_MAP=${MONITOR_LOG_MAP:-}
+      - MONITOR_SITE_APP=${MONITOR_SITE_APP:-}
       - MONITOR_SSH_PORTS=${MONITOR_SSH_PORTS:-}
       - MONITOR_VPN_PORTS=${MONITOR_VPN_PORTS:-}
     depends_on:
