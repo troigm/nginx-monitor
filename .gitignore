@@ -1,6 +1,8 @@
 # Entorno
 .env
 *.env.local
+.env.bak*
+.env.*.bak*
 
 # Python
 __pycache__/

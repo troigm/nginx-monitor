@@ -2,6 +2,60 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [2.7.1] - 2026-05-14
+
+Versión que consolida sobre v2.7.0 (multi-vhost) las mejoras que la rama
+paralela había acumulado como v2.6.1–v2.6.3: hardening de despliegue,
+documentación de seguridad y corrección del filtro de assets.
+
+### Corregido
+- **Filtro de assets unificado** (función `is_static_asset` + constante
+  `ASSET_EXTENSIONS`) reemplaza las dos listas previas que vivían cada una
+  en su propio scope (`STATIC_EXTENSIONS` set para `parse_nginx_access_log`
+  y lista inline en `parse_visits_from_access_log`).
+  - **Strip de query string y fragmento** antes de comparar extensión. Antes
+    `/style.css?ver=6.4` se contaba como visita porque `endswith('.css')`
+    devolvía `False`. Con el cache-busting típico de WordPress esto inflaba
+    los conteos del gráfico "Visitas por Aplicación".
+  - **Comparación case-insensitive** (`.PNG` se filtra igual que `.png`).
+  - **Extensiones añadidas**: `.avif` (imagen moderna), `.eot` y `.otf`
+    (fuentes), `.mp4`, `.webm`, `.mp3`, `.ogg` (media). Mantiene `.map` y
+    `.webmanifest` que ya añadió v2.7.0.
+  - **Nota**: los datos históricos de `visit_stats` no se recalculan
+    automáticamente (la tabla agrega por hora/site/app sin guardar URIs).
+    El efecto solo se nota en los logs procesados a partir del despliegue.
+
+### Seguridad (runtime de contenedores)
+- **`no-new-privileges: true`** en los dos servicios (`nginx-monitor` y
+  `postgres`) de `docker-compose.yml`. Bloquea cualquier escalada vía binarios
+  setuid/setgid dentro del contenedor.
+- **Postgres ejecutándose como `user: 70:70`** de forma explícita en compose.
+  Es el UID por defecto de `postgres:18-alpine`, pero declararlo evita que un
+  cambio de imagen base lo deje corriendo como root.
+- **`PGDATA=/var/lib/postgresql/data`** explícito como variable de entorno
+  para que la ruta del data dir no dependa del default de la imagen.
+
+### Documentación
+- **Recomendaciones de hardening** añadidas al README:
+  - Permisos del `.env` a `600` (contiene `SECRET_KEY`, `AUTH_PASS`,
+    `POSTGRES_PASSWORD` en claro).
+  - Rate-limit nginx en los paths `/nginx-monitor/` (`zone=general`) y
+    `/nginx-monitor/api/` (`zone=api`), con `burst=20 nodelay`.
+  - Filtro y jail fail2ban `nginx-monitor-auth` para banear IPs con ráfagas
+    de `401` contra el dashboard (5 fallos/5 min → 24h de ban).
+  - Procedimiento de rotación de `POSTGRES_PASSWORD` (requiere `ALTER USER`
+    dentro de la DB, cambiar solo `.env` no basta).
+  - ACL por VPN sugerida para restringir el dashboard a la red de administración.
+- **Procedimiento de backup automático** documentado en README:
+  - Integración con `/opt/docker-projects/backups/backup_all.sh`
+    (cron diario 03:00 UTC, usuario `troig`).
+  - Compresión con `zstd --ultra -22`, retención 10 días, ~45 MB por dump.
+  - Comando de restauración a partir de un `.sql.zst`.
+
+### Otros
+- `.gitignore`: excluir backups `.env.bak*` y `.env.*.bak*` (pueden contener
+  credenciales rotadas en claro).
+
 ## [2.7.0] - 2026-03-18
 
 ### Añadido

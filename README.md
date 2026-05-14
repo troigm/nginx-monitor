@@ -136,11 +136,62 @@ MONITOR_SITE_APP=shop.example.com:woocommerce
 Si se usa detrás de un proxy Nginx con path `/nginx-monitor/`:
 
 ```nginx
+# Requiere tener definidas las zonas limit_req (ejemplo):
+# limit_req_zone $binary_remote_addr zone=general:10m rate=30r/s;
+# limit_req_zone $binary_remote_addr zone=api:10m     rate=30r/s;
+
 location /nginx-monitor/ {
-    proxy_pass http://localhost:5000/;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
+    limit_req zone=general burst=20 nodelay;
+    proxy_pass http://127.0.0.1:5000/;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
 }
+
+location /nginx-monitor/api/ {
+    limit_req zone=api burst=20 nodelay;
+    proxy_pass http://127.0.0.1:5000/api/;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+Recomendado adicionalmente: restringir el path `/nginx-monitor/` al rango de la
+VPN de administración con `allow <vpn-cidr>; deny all;` (el endpoint `/csp-report`
+debe seguir siendo público para recibir reportes del navegador).
+
+### Protección brute-force con Fail2Ban (opcional pero recomendado)
+
+Además de la autenticación HTTP Basic del propio app, conviene desplegar un
+jail de fail2ban que banee IPs con ráfagas de `401` contra `/nginx-monitor/`.
+
+**Filtro** — `/etc/fail2ban/filter.d/nginx-monitor-auth.conf`:
+
+```ini
+[INCLUDES]
+before = common.conf
+
+[Definition]
+failregex = ^<HOST> -.*"(GET|POST|HEAD) /nginx-monitor/[^"]*" 401 
+ignoreregex =
+datepattern = {^LN-BEG}
+```
+
+**Jail** — añadir a `/etc/fail2ban/jail.local`:
+
+```ini
+[nginx-monitor-auth]
+enabled  = true
+filter   = nginx-monitor-auth
+action   = iptables-multiport[name=nginx-monitor-auth, port="http,https"]
+logpath  = /var/log/nginx/access.log
+backend  = auto
+findtime = 300
+maxretry = 5
+bantime  = 86400
 ```
 
 ### Endpoint CSP
@@ -295,6 +346,35 @@ curl -u admin:password -X POST "https://tu-dominio/nginx-monitor/api/cleanup?mon
 - Validación de parámetros de entrada (límites en hours, limit, months)
 - Dependencias actualizadas sin vulnerabilidades conocidas
 - Límites de recursos Docker para evitar DoS
+- `no-new-privileges:true` en ambos contenedores (bloquea escalada vía binarios setuid)
+- Postgres ejecutándose como UID 70 explícito (no root)
+
+### Recomendaciones de despliegue
+
+- **Permisos del `.env`**: `chmod 600 .env` y `chown root:root` (contiene
+  `SECRET_KEY`, `AUTH_PASS` y `POSTGRES_PASSWORD` en claro). Docker Compose
+  lo lee con el usuario que ejecuta `docker compose up`, no necesita ACL extra.
+- **Rotación de secretos**: al cambiar `POSTGRES_PASSWORD` recuerda rotar
+  también la contraseña dentro de la base ya inicializada:
+  `docker exec nginx-monitor-postgres psql -U monitor -d monitor -c "ALTER USER monitor WITH PASSWORD '<nuevo>'"`.
+  Cambiar solo `.env` no altera el password efectivo en el volumen persistente.
+- **Rate-limit en el proxy nginx** (ver sección "Configuración con Nginx Proxy")
+  y jail `nginx-monitor-auth` de fail2ban para brute-force sobre BasicAuth.
+- **Restringir el path a la VPN de administración** si no es necesario que el
+  dashboard sea accesible públicamente.
+- **Backup automático**: el proyecto está integrado en el backup maestro
+  `/opt/docker-projects/backups/backup_all.sh` (cron diario 03:00 UTC del usuario
+  `troig`). Los dumps comprimidos con `zstd --ultra -22` se guardan en
+  `/opt/docker-projects/backups/nginx-monitor/` con retención 10 días. La base
+  de ~2 GB comprime a ~45 MB por dump.
+  Restaurar un dump:
+  ```bash
+  cd /opt/docker-projects/nginx-monitor
+  docker compose exec -T postgres psql -U monitor -d postgres \
+      -c 'DROP DATABASE IF EXISTS monitor; CREATE DATABASE monitor;'
+  zstd -dc /opt/docker-projects/backups/nginx-monitor/postgres_YYYYMMDD_HHMMSS.sql.zst \
+      | docker compose exec -T postgres psql -U monitor -d monitor
+  ```
 
 ## Desarrollo
 

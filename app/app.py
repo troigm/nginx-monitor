@@ -240,6 +240,21 @@ BOT_PATTERNS = [
 INTERNAL_IPS = ['127.0.0.1', '::1']
 INTERNAL_IP_PREFIXES = ['172.', '10.', '192.168.']
 
+# Extensiones de recursos estaticos (no cuentan como visitas reales).
+# Se compara tras quitar query string/fragmento y en minusculas, para que
+# /style.css?v=123 tambien se filtre (cache-busting tipo WordPress).
+ASSET_EXTENSIONS = (
+    '.css', '.js', '.map', '.webmanifest',
+    '.png', '.jpg', '.jpeg', '.gif', '.ico', '.svg', '.webp', '.avif',
+    '.woff', '.woff2', '.ttf', '.eot', '.otf',
+    '.mp4', '.webm', '.mp3', '.ogg',
+)
+
+def is_static_asset(uri):
+    """True si la URI apunta a un recurso estatico (ignora query string y caso)."""
+    path = uri.split('?', 1)[0].split('#', 1)[0].lower()
+    return path.endswith(ASSET_EXTENSIONS)
+
 # ==================== UTILIDADES ====================
 
 def is_bot(user_agent):
@@ -324,8 +339,6 @@ def parse_nginx_error_log(log_path='/var/log/nginx/error.log', last_lines=1000, 
 
     return entries
 
-STATIC_EXTENSIONS = {'.css', '.js', '.png', '.jpg', '.jpeg', '.gif', '.ico', '.woff', '.woff2', '.ttf', '.svg', '.webp', '.map', '.webmanifest'}
-
 def parse_nginx_access_log(log_path='/var/log/nginx/access.log', last_lines=5000, site_override=None):
     """Parsea el log de acceso de nginx: peticiones reales (no bots, no estáticos)"""
     if not os.path.exists(log_path):
@@ -357,8 +370,8 @@ def parse_nginx_access_log(log_path='/var/log/nginx/access.log', last_lines=5000
                 if is_internal_ip(client_ip):
                     continue
 
-                # Excluir recursos estáticos
-                if any(uri.endswith(ext) for ext in STATIC_EXTENSIONS):
+                # Excluir recursos estáticos (con strip de query string)
+                if is_static_asset(uri):
                     continue
 
                 try:
@@ -433,8 +446,8 @@ def parse_visits_from_access_log(log_path='/var/log/nginx/access.log', last_line
             if is_internal_ip(client_ip):
                 continue
 
-            # Excluir recursos estaticos
-            if any(uri.endswith(ext) for ext in ['.css', '.js', '.png', '.jpg', '.jpeg', '.gif', '.ico', '.woff', '.woff2', '.ttf', '.svg', '.webp']):
+            # Excluir recursos estaticos (con strip de query string)
+            if is_static_asset(uri):
                 continue
 
             # Parsear timestamp
