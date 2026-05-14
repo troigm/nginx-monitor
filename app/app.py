@@ -72,6 +72,14 @@ if _raw_site_app:
 # Poner cadena vacia para no filtrar nada.
 MONITOR_SELF_PATH = os.environ.get('MONITOR_SELF_PATH', '/nginx-monitor/')
 
+# Substrings que identifican paths de administracion (WP, Django, etc.).
+# Una URI se excluye de /api/top-uris y /api/visits-by-country si CONTIENE
+# cualquiera de estos substrings. Se compara como substring (no prefijo) para
+# capturar Django montado en subpaths, p.ej. '/alquiler/admin/...'.
+# Poner cadena vacia para no filtrar nada.
+_raw_admin = os.environ.get('MONITOR_ADMIN_PATHS', '/wp-admin/,/wp-login.php,/admin/')
+MONITOR_ADMIN_PATHS = [p.strip() for p in _raw_admin.split(',') if p.strip()]
+
 # Puertos SSH configurables
 MONITOR_SSH_PORTS = {int(p) for p in os.environ.get('MONITOR_SSH_PORTS', '22,2222').split(',') if p.strip()}
 
@@ -1320,6 +1328,8 @@ def api_top_uris():
     )
     if MONITOR_SELF_PATH:
         query = query.filter(~NginxLog.request_uri.like(f'{MONITOR_SELF_PATH}%'))
+    for admin in MONITOR_ADMIN_PATHS:
+        query = query.filter(~NginxLog.request_uri.like(f'%{admin}%'))
     if site_filter:
         query = query.filter(NginxLog.site == site_filter)
     if app_filter:
@@ -1355,6 +1365,8 @@ def api_visits_by_country():
     )
     if MONITOR_SELF_PATH:
         query = query.filter(~NginxLog.request_uri.like(f'{MONITOR_SELF_PATH}%'))
+    for admin in MONITOR_ADMIN_PATHS:
+        query = query.filter(~NginxLog.request_uri.like(f'%{admin}%'))
     if site_filter:
         query = query.filter(NginxLog.site == site_filter)
     if app_filter:

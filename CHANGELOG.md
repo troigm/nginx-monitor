@@ -2,6 +2,19 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [2.7.3] - 2026-05-14
+
+### Añadido
+- **`MONITOR_ADMIN_PATHS`** (nueva variable de entorno, default
+  `/wp-admin/,/wp-login.php,/admin/`): lista de substrings que identifican
+  paths de administración. Las URIs que CONTENGAN alguno de ellos se
+  excluyen de las analíticas "Top URIs" y "Visitas por País", para que la
+  navegación administrativa (WordPress, Django) no se mezcle con el
+  tráfico real de usuarios.
+  - Comparación por substring (no por prefijo) para cubrir aplicaciones
+    Django montadas en subpaths, p.ej. `/alquiler/admin/...`.
+  - Si se deja vacía no aplica filtro.
+
 ## [2.7.2] - 2026-05-14
 
 ### Añadido
