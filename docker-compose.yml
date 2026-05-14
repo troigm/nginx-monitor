@@ -17,6 +17,7 @@ services:
       - /var/log/ufw.log:/var/log/ufw.log:ro
       - /var/log/auth.log:/var/log/auth.log:ro
       - /etc/fail2ban/ip.blacklist:/etc/fail2ban/ip.blacklist:ro
+      - /var/log/nginx-monitor:/var/log/nginx-monitor:ro
     environment:
       - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
       - AUTH_USER=${AUTH_USER:-admin}

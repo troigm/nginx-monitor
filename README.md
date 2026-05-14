@@ -194,6 +194,63 @@ maxretry = 5
 bantime  = 86400
 ```
 
+### VPN setup (host-side)
+
+Para que el dashboard muestre actividad de OpenVPN y WireGuard, el contenedor
+necesita acceso a datos que viven en el host con permisos restringidos
+(`openvpn-status.log` es `root:root 600`, `wg show` requiere `CAP_NET_ADMIN`).
+El patrón usado es un **cron en el host que vuelca periódicamente** los datos a
+una ruta legible por el contenedor.
+
+**1.** Asegúrate de que OpenVPN tiene `verb 3` en `/etc/openvpn/server.conf`
+para que el journal contenga eventos por cliente (`Peer Connection Initiated`,
+`TLS Auth Error`, etc.). Reinicia el servicio si lo cambias.
+
+**2.** Crea el directorio de volcado y el script de dump (como root):
+
+```bash
+sudo bash <<'EOF'
+mkdir -p /var/log/nginx-monitor
+chmod 755 /var/log/nginx-monitor
+
+cat > /usr/local/bin/nginx-monitor-vpn-dump.sh <<'SH'
+#!/bin/bash
+set -u
+TARGET=/var/log/nginx-monitor
+umask 022
+
+journalctl -u openvpn@server.service \
+    --since '12 minutes ago' --no-pager --output=short-iso \
+    > "$TARGET/openvpn-journal.log" 2>/dev/null || true
+
+[ -r /etc/openvpn/openvpn-status.log ] && \
+    cp /etc/openvpn/openvpn-status.log "$TARGET/openvpn-status.log"
+
+command -v wg >/dev/null 2>&1 && \
+    wg show all dump > "$TARGET/wg-dump.txt" 2>/dev/null || true
+
+chmod 644 "$TARGET"/*.log "$TARGET"/*.txt 2>/dev/null || true
+SH
+chmod 755 /usr/local/bin/nginx-monitor-vpn-dump.sh
+
+cat > /etc/cron.d/nginx-monitor-vpn <<'CRON'
+*/5 * * * * root /usr/local/bin/nginx-monitor-vpn-dump.sh
+CRON
+chmod 644 /etc/cron.d/nginx-monitor-vpn
+
+/usr/local/bin/nginx-monitor-vpn-dump.sh  # primer dump inmediato
+EOF
+```
+
+**3.** El `docker-compose.yml` ya monta `/var/log/nginx-monitor` como
+`read-only` dentro del contenedor. Si no tienes el cron, los endpoints
+`/api/vpn-stats` y `/api/vpn-peers` simplemente devuelven listas vacías.
+
+**Adaptar a tu setup**: si tu unit de OpenVPN no se llama `openvpn@server.service`
+(p. ej. usas el paquete `openvpn-server.service` o systemd-networkd para WG),
+edita el journalctl `--unit` correspondientemente. WireGuard funciona sin
+cambios siempre que `wg show` esté instalado y se ejecute como root.
+
 ### Endpoint CSP
 
 Para recibir reportes CSP, configurar el header en Nginx:

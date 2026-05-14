@@ -218,6 +218,34 @@ class SshAuthEvent(db.Model):
     )
 
 
+class VpnEvent(db.Model):
+    """Eventos de autenticacion/conexion VPN parseados del journal de OpenVPN.
+
+    WireGuard NO genera eventos de este tipo (silencioso por diseno); para WG
+    se usa el endpoint /api/vpn-peers que lee el snapshot wg-dump on-the-fly.
+    """
+    __tablename__ = 'vpn_events'
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, index=True)
+    service = db.Column(db.String(20), index=True)  # openvpn
+    event_type = db.Column(db.String(20), index=True)
+    # event_type values: 'auth_ok', 'auth_fail', 'connect', 'disconnect',
+    # 'tls_error', 'verify_error', 'reset', 'other'
+    common_name = db.Column(db.String(100), index=True)  # CN del certificado cliente
+    username = db.Column(db.String(100), index=True)
+    src_ip = db.Column(db.String(45), index=True)
+    src_port = db.Column(db.Integer)
+    message = db.Column(db.String(500))
+    raw_line = db.Column(db.Text)
+
+    __table_args__ = (
+        db.Index('idx_vpn_timestamp_service', 'timestamp', 'service'),
+        db.Index('idx_vpn_src_ip_timestamp', 'src_ip', 'timestamp'),
+        db.UniqueConstraint('timestamp', 'src_ip', 'event_type', 'raw_line',
+                            name='unique_vpn_event'),
+    )
+
+
 # ==================== AUTENTICACIÓN ====================
 
 def check_auth(username, password):
@@ -888,6 +916,212 @@ def sync_ssh_auth_internal():
         db.session.rollback()
         app.logger.error(f"Error syncing SSH auth: {e}")
 
+# ==================== VPN: OpenVPN journal + status + WireGuard ====================
+#
+# Los ficheros son volcados por /usr/local/bin/nginx-monitor-vpn-dump.sh (cron
+# /etc/cron.d/nginx-monitor-vpn cada 5 min). Ver README "VPN setup" para los
+# pasos host-side. El contenedor solo los lee, no escribe nada en el host.
+
+VPN_DUMP_DIR = '/var/log/nginx-monitor'
+OPENVPN_JOURNAL_PATH = f'{VPN_DUMP_DIR}/openvpn-journal.log'
+OPENVPN_STATUS_PATH = f'{VPN_DUMP_DIR}/openvpn-status.log'
+WG_DUMP_PATH = f'{VPN_DUMP_DIR}/wg-dump.txt'
+
+# journalctl --output=short-iso line format:
+#   2026-05-10T23:51:51+02:00 hostname ovpn-server[PID]: <msg>
+_OVPN_JOURNAL_LINE = re.compile(
+    r'^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})[+\-]\d{2}:\d{2}\s+'
+    r'\S+\s+ovpn-server\[\d+\]:\s+(.*)$'
+)
+# Prefijo "CN/IP:PORT msg" presente en eventos por-cliente
+_OVPN_CLIENT_PREFIX = re.compile(
+    r'^(\S+?)/(\d+\.\d+\.\d+\.\d+):(\d+)\s+(.*)$'
+)
+
+def _classify_openvpn_event(msg):
+    """Clasifica un mensaje de openvpn en un event_type estandar.
+    Devuelve None si no es interesante (skip)."""
+    m = msg.lower()
+    if 'tls auth error' in m or 'auth_failed' in m or 'authentication failed' in m \
+            or 'username/password verification failed' in m:
+        return 'auth_fail'
+    if 'peer connection initiated' in m:
+        return 'connect'
+    if 'sigterm' in m or 'sigint' in m or 'client-instance exiting' in m:
+        return 'disconnect'
+    if 'tls error' in m or 'tls handshake failed' in m:
+        return 'tls_error'
+    if 'verify error' in m or 'verify x509' in m:
+        return 'verify_error'
+    if 'connection reset' in m:
+        return 'reset'
+    if 'multi_sva' in m and 'pool returned' in m:
+        # Asignacion de IP del pool: lo tratamos como auth_ok porque solo
+        # ocurre tras autenticacion exitosa.
+        return 'auth_ok'
+    return None
+
+def parse_openvpn_journal(path=OPENVPN_JOURNAL_PATH):
+    """Parsea el volcado del journal de OpenVPN. Devuelve lista de dicts
+    aptos para crear filas de VpnEvent."""
+    if not os.path.exists(path):
+        return []
+    entries = []
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            for line in f:
+                line = line.rstrip('\n')
+                if not line or line.startswith('--'):
+                    continue
+                m = _OVPN_JOURNAL_LINE.match(line)
+                if not m:
+                    continue
+                ts_str, msg = m.group(1), m.group(2)
+                try:
+                    timestamp = datetime.strptime(ts_str, '%Y-%m-%dT%H:%M:%S')
+                except ValueError:
+                    continue
+                event_type = _classify_openvpn_event(msg)
+                if event_type is None:
+                    continue
+                common_name = username = src_ip = None
+                src_port = 0
+                client_m = _OVPN_CLIENT_PREFIX.match(msg)
+                if client_m:
+                    common_name = client_m.group(1)
+                    src_ip = client_m.group(2)
+                    src_port = int(client_m.group(3))
+                    # En el setup tipico de easy-rsa, CN == username del cert
+                    username = common_name
+                entries.append({
+                    'timestamp': timestamp,
+                    'service': 'openvpn',
+                    'event_type': event_type,
+                    'common_name': common_name,
+                    'username': username,
+                    'src_ip': src_ip,
+                    'src_port': src_port,
+                    'message': msg[:500],
+                    'raw_line': line,
+                })
+    except Exception as e:
+        app.logger.error(f"Error parsing openvpn journal: {e}")
+    return entries
+
+def parse_openvpn_status(path=OPENVPN_STATUS_PATH):
+    """Parsea el snapshot de clientes OpenVPN conectados ahora.
+    Formato: cabecera + 'CLIENT LIST' + filas CSV + 'ROUTING TABLE' + ..."""
+    if not os.path.exists(path):
+        return {'updated': None, 'clients': []}
+    clients = []
+    updated = None
+    section = None
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            for raw in f:
+                line = raw.rstrip('\n')
+                if line.startswith('Updated,'):
+                    updated = line.split(',', 1)[1].strip()
+                    continue
+                if line == 'OpenVPN CLIENT LIST':
+                    section = 'clients_header'
+                    continue
+                if line.startswith('Common Name,Real Address,'):
+                    section = 'clients_rows'
+                    continue
+                if line == 'ROUTING TABLE' or line == 'GLOBAL STATS' or line == 'END':
+                    section = None
+                    continue
+                if section == 'clients_rows' and ',' in line:
+                    parts = line.split(',')
+                    if len(parts) >= 5:
+                        cn, real_addr, b_recv, b_sent, connected = parts[:5]
+                        try:
+                            b_recv_i = int(b_recv)
+                            b_sent_i = int(b_sent)
+                        except ValueError:
+                            b_recv_i = b_sent_i = 0
+                        clients.append({
+                            'common_name': cn,
+                            'real_address': real_addr,
+                            'bytes_recv': b_recv_i,
+                            'bytes_sent': b_sent_i,
+                            'connected_since': connected,
+                        })
+    except Exception as e:
+        app.logger.error(f"Error parsing openvpn status: {e}")
+    return {'updated': updated, 'clients': clients}
+
+def parse_wg_dump(path=WG_DUMP_PATH):
+    """Parsea 'wg show all dump'. Una linea por peer (9 columnas).
+    Las lineas de 5 columnas son la config del interface, las saltamos.
+    Devuelve lista de peers con last-handshake convertido a datetime UTC.
+    """
+    if not os.path.exists(path):
+        return []
+    peers = []
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            for line in f:
+                cols = line.rstrip('\n').split('\t')
+                if len(cols) != 9:
+                    continue  # config de interface u otra cosa
+                interface, pubkey, _psk, endpoint, allowed_ips, \
+                    handshake_epoch, rx, tx, _keepalive = cols
+                try:
+                    epoch = int(handshake_epoch)
+                    last_handshake = datetime.utcfromtimestamp(epoch) if epoch > 0 else None
+                except ValueError:
+                    last_handshake = None
+                try:
+                    rx_i, tx_i = int(rx), int(tx)
+                except ValueError:
+                    rx_i = tx_i = 0
+                peers.append({
+                    'interface': interface,
+                    'public_key': pubkey,
+                    'endpoint': endpoint if endpoint != '(none)' else None,
+                    'allowed_ips': allowed_ips,
+                    'last_handshake': last_handshake,
+                    'bytes_recv': rx_i,
+                    'bytes_sent': tx_i,
+                })
+    except Exception as e:
+        app.logger.error(f"Error parsing wg dump: {e}")
+    return peers
+
+def sync_vpn_internal():
+    """Persiste eventos de OpenVPN journal en la BD con deduplicacion.
+    Los snapshots (openvpn-status, wg-dump) NO se persisten, se leen
+    on-the-fly desde /api/vpn-peers."""
+    entries = parse_openvpn_journal()
+    if not entries:
+        return
+
+    last_event = VpnEvent.query.order_by(VpnEvent.timestamp.desc()).first()
+    cutoff = last_event.timestamp if last_event else datetime.utcnow() - timedelta(days=30)
+
+    existing_keys = {
+        (e.timestamp, e.src_ip, e.event_type, e.raw_line)
+        for e in VpnEvent.query.filter(VpnEvent.timestamp > cutoff).all()
+    }
+    new_count = 0
+    for entry in entries:
+        if entry['timestamp'] >= cutoff:
+            key = (entry['timestamp'], entry['src_ip'], entry['event_type'], entry['raw_line'])
+            if key not in existing_keys:
+                db.session.add(VpnEvent(**entry))
+                existing_keys.add(key)
+                new_count += 1
+    try:
+        db.session.commit()
+        if new_count > 0:
+            app.logger.info(f"Synced {new_count} VPN events")
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f"Error syncing VPN events: {e}")
+
+
 def _get_site_cutoff(site):
     """Obtiene el cutoff por site (último log de ESE site)"""
     last_log = NginxLog.query.filter(NginxLog.site == site).order_by(NginxLog.timestamp.desc()).first()
@@ -948,6 +1182,9 @@ def sync_logs():
 
         # Sincronizar SSH auth
         sync_ssh_auth_internal()
+
+        # Sincronizar VPN (OpenVPN journal; WireGuard se sirve on-the-fly)
+        sync_vpn_internal()
 
 @app.context_processor
 def inject_config():
@@ -2098,6 +2335,115 @@ def api_ssh_auth_events():
         }
     })
 
+@app.route('/api/vpn-stats')
+@requires_auth
+def api_vpn_stats():
+    """Estadisticas de eventos VPN (OpenVPN journal).
+
+    WireGuard NO tiene eventos aqui (no genera logs de intento por diseno);
+    ver /api/vpn-peers para el estado actual de peers WG.
+    """
+    hours = validate_int_param(request.args.get('hours'), 24, 1, 2160)
+    cutoff = datetime.utcnow() - timedelta(hours=hours)
+
+    base = db.session.query(VpnEvent).filter(VpnEvent.timestamp >= cutoff)
+
+    # Totales por event_type
+    totals_rows = db.session.query(
+        VpnEvent.event_type, db.func.count(VpnEvent.id)
+    ).filter(VpnEvent.timestamp >= cutoff).group_by(VpnEvent.event_type).all()
+    totals = {row[0]: row[1] for row in totals_rows}
+
+    success_types = ('auth_ok', 'connect')
+    failure_types = ('auth_fail', 'tls_error', 'verify_error')
+    success_total = sum(v for k, v in totals.items() if k in success_types)
+    failure_total = sum(v for k, v in totals.items() if k in failure_types)
+
+    # Top usuarios con login exitoso (connect / auth_ok)
+    top_users_ok = db.session.query(
+        VpnEvent.username, db.func.count(VpnEvent.id).label('c')
+    ).filter(
+        VpnEvent.timestamp >= cutoff,
+        VpnEvent.event_type.in_(success_types),
+        VpnEvent.username.isnot(None),
+    ).group_by(VpnEvent.username).order_by(db.desc('c')).limit(10).all()
+
+    # Top IPs con intentos fallidos
+    top_ips_failed = db.session.query(
+        VpnEvent.src_ip, db.func.count(VpnEvent.id).label('c'),
+        db.func.max(VpnEvent.timestamp).label('last_seen')
+    ).filter(
+        VpnEvent.timestamp >= cutoff,
+        VpnEvent.event_type.in_(failure_types),
+        VpnEvent.src_ip.isnot(None),
+    ).group_by(VpnEvent.src_ip).order_by(db.desc('c')).limit(10).all()
+
+    # Top usuarios atacados (auth_fail con username)
+    top_users_failed = db.session.query(
+        VpnEvent.username, db.func.count(VpnEvent.id).label('c')
+    ).filter(
+        VpnEvent.timestamp >= cutoff,
+        VpnEvent.event_type.in_(failure_types),
+        VpnEvent.username.isnot(None),
+    ).group_by(VpnEvent.username).order_by(db.desc('c')).limit(10).all()
+
+    # Eventos recientes (todos los tipos)
+    recent = base.order_by(VpnEvent.timestamp.desc()).limit(50).all()
+
+    return jsonify({
+        'totals': {
+            'success': success_total,
+            'failure': failure_total,
+            'by_type': totals,
+        },
+        'top_users_ok': [{'username': u, 'count': c} for u, c in top_users_ok],
+        'top_users_failed': [{'username': u, 'count': c} for u, c in top_users_failed],
+        'top_ips_failed': [
+            {'ip': ip, 'count': c, 'last_seen': ls.isoformat() if ls else None}
+            for ip, c, ls in top_ips_failed
+        ],
+        'recent': [
+            {
+                'timestamp': e.timestamp.isoformat(),
+                'event_type': e.event_type,
+                'common_name': e.common_name,
+                'username': e.username,
+                'src_ip': e.src_ip,
+                'message': e.message,
+            } for e in recent
+        ],
+    })
+
+
+@app.route('/api/vpn-peers')
+@requires_auth
+def api_vpn_peers():
+    """Snapshot ON-THE-FLY de peers conectados:
+    - OpenVPN: clientes con sesion activa (de openvpn-status.log)
+    - WireGuard: peers con su last-handshake y transfer (de wg show dump)
+    Los dos ficheros los vuelca el cron del host /usr/local/bin/nginx-monitor-vpn-dump.sh.
+    """
+    ovpn = parse_openvpn_status()
+    wg = parse_wg_dump()
+    return jsonify({
+        'openvpn': {
+            'updated': ovpn['updated'],
+            'clients': ovpn['clients'],
+        },
+        'wireguard': [
+            {
+                'interface': p['interface'],
+                'public_key': p['public_key'],
+                'endpoint': p['endpoint'],
+                'allowed_ips': p['allowed_ips'],
+                'last_handshake': p['last_handshake'].isoformat() if p['last_handshake'] else None,
+                'bytes_recv': p['bytes_recv'],
+                'bytes_sent': p['bytes_sent'],
+            } for p in wg
+        ],
+    })
+
+
 @app.route('/api/permanent-blacklist')
 @requires_auth
 def api_permanent_blacklist():
@@ -2238,7 +2584,16 @@ def api_cleanup():
 
 def create_tables():
     with app.app_context():
-        db.create_all()
+        try:
+            db.create_all()
+        except Exception as e:
+            # Race condition: con varios workers de gunicorn arrancando a la
+            # vez, todos llaman a create_all() y pueden chocar contra
+            # pg_type_typname_nsp_index si una tabla nueva esta siendo creada.
+            # Si las tablas ya existen, el resto del worker funciona; si el
+            # error fuera de schema real, fallara mas adelante al hacer queries.
+            db.session.rollback()
+            app.logger.warning(f"db.create_all() race (ignored): {e}")
 
 def init_scheduler():
     """Inicializa el scheduler para sincronizar logs y limpieza"""

@@ -2,6 +2,56 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [2.8.0] - 2026-05-14
+
+### Añadido
+- **Sección "VPN - OpenVPN + WireGuard"** en el tab SSH/VPN del dashboard:
+  - 4 stats cards: VPN Conexiones OK, VPN Auth Fallidas, Peers WireGuard Activos,
+    Bloqueos UFW Puertos VPN.
+  - Card "Top Usuarios OpenVPN" (logins exitosos por usuario).
+  - Card "Top IPs OpenVPN Fallidas" con geolocalización (banderas).
+  - Card "Peers WireGuard" mostrando peers OpenVPN conectados ahora + peers
+    WG con interface, endpoint, `last-handshake` relativo, transfer rx/tx.
+    Un peer WG se considera "activo" si tuvo handshake en los últimos 3 min.
+  - Card "Bloqueos UFW a Puertos VPN" reutilizando `/api/ufw-vpn-stats`.
+- **Modelo `VpnEvent`** (`vpn_events`) para eventos históricos parseados del
+  journal de OpenVPN: timestamp, service, event_type
+  (`auth_ok`/`auth_fail`/`connect`/`disconnect`/`tls_error`/`verify_error`/`reset`),
+  common_name, username, src_ip, src_port, message, raw_line. Unique
+  constraint para deduplicación entre ejecuciones del sync.
+- **Parsers**: `parse_openvpn_journal()` (journalctl short-iso format),
+  `parse_openvpn_status()` (formato CSV de openvpn-status.log) y
+  `parse_wg_dump()` (output de `wg show all dump`).
+- **Endpoints**:
+  - `GET /api/vpn-stats?hours=N`: totales, top usuarios OK/fallidos,
+    top IPs fallidas, eventos recientes.
+  - `GET /api/vpn-peers`: snapshot on-the-fly (no persistente) de clientes
+    OpenVPN y peers WireGuard.
+- **`sync_vpn_internal()`** integrado en el ciclo periódico `sync_logs()`
+  (cada 5 min, junto con visits/fail2ban/ufw/ssh).
+- **Volumen `/var/log/nginx-monitor`** read-only en `docker-compose.yml`.
+
+### Corregido
+- **Race condition en `create_tables()`**: con varios workers de gunicorn
+  arrancando a la vez, `db.create_all()` colisionaba contra
+  `pg_type_typname_nsp_index` al añadir tablas nuevas, crasheando el worker
+  en cold boot. Ahora se captura el error y se hace rollback (las tablas
+  existentes ya están bien; un schema mismatch real fallaría más tarde en
+  queries reales).
+
+### Documentación
+- **Nueva sección "VPN setup (host-side)"** en README con el bloque de comandos
+  para crear el cron host que vuelca journal OpenVPN + `openvpn-status.log` +
+  `wg show all dump` a `/var/log/nginx-monitor/` (legible por el contenedor).
+  Sin este cron, los endpoints VPN devuelven listas vacías.
+
+### Notas operativas
+- WireGuard **no registra fallos de autenticación** por diseño del protocolo
+  (paquetes sin clave válida se descartan en silencio). La card "VPN Auth
+  Fallidas" solo refleja eventos de OpenVPN.
+- OpenVPN necesita `verb 3` o superior para que los eventos por cliente
+  aparezcan en el journal.
+
 ## [2.7.3] - 2026-05-14
 
 ### Añadido
