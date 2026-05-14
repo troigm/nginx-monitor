@@ -2,6 +2,15 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [2.8.1] - 2026-05-14
+
+### Documentación
+- `.env.example`: incluir `/panel/` en el valor recomendado de
+  `MONITOR_ADMIN_PATHS`. Es un patrón muy común en proyectos Django para
+  paneles privados de cliente y conviene tenerlo en el ejemplo. El default
+  del `docker-compose.yml` se mantiene en `/wp-admin/,/wp-login.php,/admin/`
+  (sin `/panel/`) porque no es un convenio universal.
+
 ## [2.8.0] - 2026-05-14
 
 ### Añadido
