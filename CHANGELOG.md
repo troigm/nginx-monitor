@@ -2,6 +2,38 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [2.7.2] - 2026-05-14
+
+### Añadido
+- **Card "Top 10 Páginas Visitadas (200)"** en el dashboard Nginx:
+  - Nuevo endpoint `/api/top-uris` que consulta `NginxLog` filtrando
+    `log_type='access'` y `status_code=200`.
+  - URIs agrupadas ignorando query string: `/producto?id=1` y `/producto?id=2`
+    cuentan como `/producto` (vía `split_part(request_uri, '?', 1)` en SQL).
+  - Respeta filtros de site/app y rango temporal del dashboard.
+  - UI siguiendo el patrón `top-ips-card.compact` (lista plana con URI
+    truncada a 60 chars + contador, tooltip con la URI completa).
+- **Card "Visitas por País (200)"** con desglose de regiones de España:
+  - Nuevo endpoint `/api/visits-by-country` que devuelve top N IPs únicas
+    (default 200, max 1000) con su número de visitas 200. El frontend
+    agrega por país tras hacer batch geo lookup contra `/api/geoip`.
+  - Doughnut de Chart.js con top 8 países y agrupación "Otros" para el resto.
+  - Cuando hay tráfico desde España, debajo del doughnut aparece una franja
+    con chips de las CCAA/regiones top 8 (estilo `.region-chip`).
+- **`MONITOR_SELF_PATH`** (nueva variable de entorno, default `/nginx-monitor/`):
+  - Excluye URIs que empiezan por este prefijo de las dos nuevas analíticas
+    para que el polling del propio dashboard no contamine los datos de
+    visitas reales a las apps monitorizadas.
+  - Si se deja vacía no aplica filtro.
+
+### Mejorado
+- **`/api/geoip`** amplía los campos que pide a `ip-api.com` (`regionName`,
+  `region`) sin coste extra (campos gratis del batch endpoint).
+- **`getGeoInfoBatch`** (base.html) ahora procesa todos los chunks de IPs
+  encadenando llamadas de 100 en 100 (antes silenciaba IPs >100 del primer
+  batch, pequeño bug latente que afloraba con muchos visitantes únicos).
+  Guarda también `regionName` y `region` en el cache local.
+
 ## [2.7.1] - 2026-05-14
 
 Versión que consolida sobre v2.7.0 (multi-vhost) las mejoras que la rama

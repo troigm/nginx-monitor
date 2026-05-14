@@ -66,6 +66,12 @@ if _raw_site_app:
         if len(_parts) == 2:
             MONITOR_SITE_APP[_parts[0].strip()] = _parts[1].strip()
 
+# Path bajo el que sirve el propio dashboard. Las URIs que empiezan por aqui
+# se excluyen de /api/top-uris y /api/visits-by-country para que el monitor no
+# contamine sus propias analiticas con su trafico interno (polling del frontend).
+# Poner cadena vacia para no filtrar nada.
+MONITOR_SELF_PATH = os.environ.get('MONITOR_SELF_PATH', '/nginx-monitor/')
+
 # Puertos SSH configurables
 MONITOR_SSH_PORTS = {int(p) for p in os.environ.get('MONITOR_SSH_PORTS', '22,2222').split(',') if p.strip()}
 
@@ -1286,6 +1292,78 @@ def api_sync():
     sync_logs()
     return jsonify({'status': 'ok', 'message': 'Logs synchronized'})
 
+@app.route('/api/top-uris')
+@requires_auth
+def api_top_uris():
+    """Top URIs (paginas) mas visitadas con status 200.
+
+    Agrupa por path ignorando query string (`/producto?id=1` y `/producto?id=2`
+    cuentan como `/producto`). Respeta filtros de site/app del dashboard y los
+    filtros que ya aplico parse_nginx_access_log al guardar (sin bots, sin IPs
+    internas, sin assets), porque solo consulta filas con log_type='access'.
+    """
+    hours = validate_int_param(request.args.get('hours'), 24, 1, 2160)
+    limit = validate_int_param(request.args.get('limit'), 10, 1, 50)
+    site_filter = request.args.get('site')
+    app_filter = request.args.get('app')
+    cutoff = datetime.utcnow() - timedelta(hours=hours)
+
+    uri_path = db.func.split_part(NginxLog.request_uri, '?', 1)
+
+    query = db.session.query(
+        uri_path.label('uri'),
+        db.func.count(NginxLog.id).label('visits')
+    ).filter(
+        NginxLog.timestamp >= cutoff,
+        NginxLog.log_type == 'access',
+        NginxLog.status_code == 200
+    )
+    if MONITOR_SELF_PATH:
+        query = query.filter(~NginxLog.request_uri.like(f'{MONITOR_SELF_PATH}%'))
+    if site_filter:
+        query = query.filter(NginxLog.site == site_filter)
+    if app_filter:
+        query = query.filter(NginxLog.app == app_filter)
+
+    results = query.group_by(uri_path).order_by(db.desc('visits')).limit(limit).all()
+    return jsonify([{'uri': u or '/', 'visits': v} for u, v in results])
+
+
+@app.route('/api/visits-by-country')
+@requires_auth
+def api_visits_by_country():
+    """IPs unicas (status 200) con su numero de visitas, para que el frontend
+    haga el geo lookup batch en /api/geoip y agregue por pais/region.
+
+    Limita a las top N IPs por count (default 200) para no martillear el
+    proveedor de geo. Las top 200 IPs cubren tipicamente la gran mayoria del
+    trafico real en el periodo del dashboard.
+    """
+    hours = validate_int_param(request.args.get('hours'), 24, 1, 2160)
+    limit = validate_int_param(request.args.get('limit'), 200, 1, 1000)
+    site_filter = request.args.get('site')
+    app_filter = request.args.get('app')
+    cutoff = datetime.utcnow() - timedelta(hours=hours)
+
+    query = db.session.query(
+        NginxLog.client_ip,
+        db.func.count(NginxLog.id).label('visits')
+    ).filter(
+        NginxLog.timestamp >= cutoff,
+        NginxLog.log_type == 'access',
+        NginxLog.status_code == 200
+    )
+    if MONITOR_SELF_PATH:
+        query = query.filter(~NginxLog.request_uri.like(f'{MONITOR_SELF_PATH}%'))
+    if site_filter:
+        query = query.filter(NginxLog.site == site_filter)
+    if app_filter:
+        query = query.filter(NginxLog.app == app_filter)
+
+    results = query.group_by(NginxLog.client_ip).order_by(db.desc('visits')).limit(limit).all()
+    return jsonify([{'ip': ip, 'visits': v} for ip, v in results])
+
+
 @app.route('/api/geoip', methods=['POST'])
 @requires_auth
 def api_geoip():
@@ -1299,11 +1377,13 @@ def api_geoip():
     if not ips:
         return jsonify([])
 
-    # ip-api.com batch endpoint (max 100 IPs)
+    # ip-api.com batch endpoint (max 100 IPs).
+    # Pedimos tambien regionName/region para poder desglosar visitas dentro
+    # de Espana (ver /api/visits-by-country en el dashboard).
     try:
         req_data = json.dumps(ips[:100]).encode('utf-8')
         req = urllib.request.Request(
-            'http://ip-api.com/batch?fields=query,status,country,countryCode',
+            'http://ip-api.com/batch?fields=query,status,country,countryCode,regionName,region',
             data=req_data,
             headers={'Content-Type': 'application/json'}
         )

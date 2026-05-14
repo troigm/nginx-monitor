@@ -168,6 +168,22 @@
         .top-ips-card.compact .ip-country { font-size: 0.72em; }
         .top-ips-card.compact .ip-count { padding: 3px 9px; font-size: 0.8em; }
 
+        /* Regiones de Espana (desglose bajo el doughnut de paises) */
+        .regions-es { margin-top: 12px; padding-top: 10px; border-top: 1px solid #2a2a4a; }
+        .regions-es:empty { display: none; }
+        .regions-es-title { font-size: 0.75em; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+        .region-chip {
+            display: inline-block;
+            background: #232342;
+            border: 1px solid #2a2a4a;
+            padding: 2px 8px;
+            margin: 2px 4px 2px 0;
+            border-radius: 10px;
+            font-size: 0.75em;
+            color: #ccc;
+        }
+        .region-chip b { color: #00d9ff; margin-left: 4px; }
+
         /* Top IPs */
         .top-ips-card {
             background: #1a1a2e;
@@ -457,20 +473,31 @@
         async function getGeoInfoBatch(ips) {
             const uncached = ips.filter(ip => !geoCache[ip]);
             if (uncached.length === 0) return;
-            try {
-                const res = await apiFetch(`${basePath}/api/geoip`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ips: uncached.slice(0, 100) })
-                });
-                const data = await res.json();
-                data.forEach(item => {
-                    geoCache[item.query] = item.status === 'success'
-                        ? { country: item.country, countryCode: item.countryCode, flag: countryCodeToFlag(item.countryCode) }
-                        : { country: 'Desconocido', countryCode: '', flag: '' };
-                });
-            } catch (e) {
-                console.error('Error fetching geo info:', e);
+            // ip-api.com acepta max 100 IPs por batch
+            for (let i = 0; i < uncached.length; i += 100) {
+                const chunk = uncached.slice(i, i + 100);
+                try {
+                    const res = await apiFetch(`${basePath}/api/geoip`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ips: chunk })
+                    });
+                    const data = await res.json();
+                    data.forEach(item => {
+                        geoCache[item.query] = item.status === 'success'
+                            ? {
+                                country: item.country,
+                                countryCode: item.countryCode,
+                                regionName: item.regionName || '',
+                                region: item.region || '',
+                                flag: countryCodeToFlag(item.countryCode)
+                              }
+                            : { country: 'Desconocido', countryCode: '', regionName: '', region: '', flag: '' };
+                    });
+                } catch (e) {
+                    console.error('Error fetching geo info:', e);
+                    break;
+                }
             }
         }
 

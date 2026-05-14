@@ -96,6 +96,23 @@
     </div>
 </div>
 
+<!-- Charts Row 3: Top URIs + Visitas por Pais (status 200) -->
+<div class="charts-row">
+    <div class="top-ips-card compact">
+        <h2>Top 10 Paginas Visitadas (200)</h2>
+        <div id="topUris">
+            <div class="loading">Cargando...</div>
+        </div>
+    </div>
+    <div class="chart-card chart-card-fill">
+        <h2>Visitas por Pais (200)</h2>
+        <div class="chart-container-fill">
+            <canvas id="chartByCountry"></canvas>
+        </div>
+        <div id="regionsEs" class="regions-es"></div>
+    </div>
+</div>
+
 <!-- ========== FAIL2BAN SECTION ========== -->
 <h3>Fail2Ban - Bloqueo Automatico de IPs</h3>
 
@@ -460,6 +477,22 @@
             options: { ...defaultOptions, plugins: { legend: { display: false } } }
         });
 
+        charts.byCountry = new Chart(document.getElementById('chartByCountry'), {
+            type: 'doughnut',
+            data: {
+                labels: [],
+                datasets: [{
+                    data: [],
+                    backgroundColor: [
+                        chartColors.blue, chartColors.orange, chartColors.purple,
+                        chartColors.red, chartColors.green, '#8e44ad',
+                        '#16a085', '#d35400'
+                    ]
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: '#888', font: { size: 11 } } } } }
+        });
+
         charts.f2bByJail = new Chart(document.getElementById('chartF2bByJail'), {
             type: 'doughnut',
             data: { labels: [], datasets: [{ data: [], backgroundColor: [chartColors.red, chartColors.orange, chartColors.purple, chartColors.blue] }] },
@@ -539,6 +572,86 @@
             charts.byApp.data.datasets[0].data = Object.values(byApp);
             charts.byApp.update();
         } catch (e) { console.error('Error loading timeline:', e); }
+    }
+
+    async function loadTopUris() {
+        const f = getFilters();
+        const params = new URLSearchParams({ hours: f.hours, site: f.site || '', app: f.app || '', limit: 10 });
+        const container = document.getElementById('topUris');
+        try {
+            const res = await apiFetch(`${basePath}/api/top-uris?${params}`);
+            const data = await res.json();
+            if (!data.length) {
+                container.innerHTML = '<div class="empty">Sin visitas 200 en el periodo</div>';
+                return;
+            }
+            container.innerHTML = data.map(item => {
+                const uri = item.uri.length > 60 ? item.uri.slice(0, 57) + '...' : item.uri;
+                return `<div class="ip-row">
+                    <div class="ip-info">
+                        <div>
+                            <div class="ip-address" title="${item.uri}">${uri}</div>
+                        </div>
+                    </div>
+                    <span class="ip-count">${formatNumber(item.visits)}</span>
+                </div>`;
+            }).join('');
+        } catch (e) {
+            console.error('Error loading top URIs:', e);
+            container.innerHTML = '<div class="empty">Error al cargar</div>';
+        }
+    }
+
+    async function loadVisitsByCountry() {
+        const f = getFilters();
+        const params = new URLSearchParams({ hours: f.hours, site: f.site || '', app: f.app || '' });
+        const regionsBox = document.getElementById('regionsEs');
+        try {
+            const res = await apiFetch(`${basePath}/api/visits-by-country?${params}`);
+            const ipData = await res.json();
+            if (!ipData.length) {
+                charts.byCountry.data.labels = [];
+                charts.byCountry.data.datasets[0].data = [];
+                charts.byCountry.update();
+                regionsBox.innerHTML = '';
+                return;
+            }
+            await getGeoInfoBatch(ipData.map(d => d.ip));
+
+            const byCountry = {};
+            const byRegionEs = {};
+            ipData.forEach(d => {
+                const geo = geoCache[d.ip];
+                if (!geo) return;
+                const country = geo.country || 'Desconocido';
+                byCountry[country] = (byCountry[country] || 0) + d.visits;
+                if (geo.countryCode === 'ES' && geo.regionName) {
+                    byRegionEs[geo.regionName] = (byRegionEs[geo.regionName] || 0) + d.visits;
+                }
+            });
+
+            const sortedCountries = Object.entries(byCountry).sort((a, b) => b[1] - a[1]);
+            const top = sortedCountries.slice(0, 8);
+            const rest = sortedCountries.slice(8).reduce((s, [, v]) => s + v, 0);
+            const labels = top.map(([c]) => c);
+            const values = top.map(([, v]) => v);
+            if (rest > 0) { labels.push('Otros'); values.push(rest); }
+            charts.byCountry.data.labels = labels;
+            charts.byCountry.data.datasets[0].data = values;
+            charts.byCountry.update();
+
+            const sortedRegions = Object.entries(byRegionEs).sort((a, b) => b[1] - a[1]).slice(0, 8);
+            if (sortedRegions.length === 0) {
+                regionsBox.innerHTML = '';
+            } else {
+                regionsBox.innerHTML = '<div class="regions-es-title">Regiones de Espana</div>' +
+                    sortedRegions.map(([r, v]) =>
+                        `<span class="region-chip">${r} <b>${formatNumber(v)}</b></span>`
+                    ).join('');
+            }
+        } catch (e) {
+            console.error('Error loading visits by country:', e);
+        }
     }
 
     async function loadFail2banStats() {
@@ -666,6 +779,8 @@
             loadDashboardStats(),
             loadFail2banStats(),
             loadTimeline(),
+            loadTopUris(),
+            loadVisitsByCountry(),
             loadCspReports(),
             loadNginxLogs(),
             loadFail2banEvents()
