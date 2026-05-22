@@ -4,25 +4,25 @@
 
 {% block content %}
 <!-- ========== UFW SECTION ========== -->
-<h3>UFW/iptables - Firewall de Red</h3>
+<h3>🛡 UFW/iptables - Firewall de Red</h3>
 
 <!-- UFW Stats Cards -->
 <div class="stats-grid-4">
     <div class="stat-card danger">
         <div class="number" id="statUfwBlocks">-</div>
-        <div class="label">Conexiones Bloqueadas</div>
+        <div class="label">🛡 Bloqueadas</div>
     </div>
     <div class="stat-card info">
         <div class="number" id="statUfwTotal">-</div>
-        <div class="label">Total Eventos</div>
+        <div class="label">📊 Total Eventos</div>
     </div>
     <div class="stat-card">
         <div class="number" id="statUfwTcp">-</div>
-        <div class="label">TCP Bloqueado</div>
+        <div class="label">🔴 TCP Bloqueado</div>
     </div>
     <div class="stat-card warning">
         <div class="number" id="statUfwUdp">-</div>
-        <div class="label">UDP Bloqueado</div>
+        <div class="label">🟠 UDP Bloqueado</div>
     </div>
 </div>
 
@@ -44,13 +44,13 @@
 
 <!-- UFW Top IPs -->
 <div class="charts-row">
-    <div class="top-ips-card compact">
+    <div class="top-ips-card">
         <h2>Top IPs Bloqueadas (UFW)</h2>
         <div id="topUfwBlocked">
             <div class="loading">Cargando...</div>
         </div>
     </div>
-    <div class="chart-card chart-card-fill">
+    <div class="chart-card">
         <h2>Categorias de Bloqueo</h2>
         <div class="chart-container-fill">
             <canvas id="chartUfwCategory"></canvas>
@@ -61,7 +61,7 @@
 <!-- ========== UFW EVENTS TABLE ========== -->
 <div class="section-divider"></div>
 
-<h3>Eventos UFW</h3>
+<h3>📋 Eventos UFW</h3>
 
 <div class="table-container" style="border-radius: 12px;">
     <div class="table-filters">

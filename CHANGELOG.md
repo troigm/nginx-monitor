@@ -2,6 +2,30 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [2.8.0] - 2026-05-23
+
+### Corregido
+- **Truncamiento VARCHAR(500) en `nginx_logs`** - `request_uri` y `message` se truncan a 500 caracteres antes de insertar
+  - Síntoma: contenedor `Up (healthy)` pero sin datos nuevos en BD; ~1152 errores `psycopg.errors.StringDataRightTruncation` en 24 h
+  - Causa: URIs maliciosas de botnets con query strings >500 chars hacían fallar el batch INSERT completo (1000 filas), perdiendo también las válidas
+  - Fix en `parse_nginx_error_log` y `parse_nginx_access_log`: `uri[:500]` defensivo, igual que ya se hacía con `user_agent`
+- **`sync_visits_internal` reescrito con `INSERT ... ON CONFLICT`** - PostgreSQL upsert nativo en una sola query
+  - Elimina N+1 (carga previa de existentes) y race condition entre `SELECT` y `UPDATE`
+  - Solo actualiza si `excluded.visits > visits` actual (idempotente)
+  - Requiere constraint `unique_hour_site_app` en `visit_stats`
+- **`scripts/manage-blacklist.sh`** - `ipset save manual-blacklist` en lugar de `ipset save` global
+  - Antes sobrescribía `/etc/ipset.conf` con TODOS los sets del sistema (incluido `asia-block`), generando conflictos al recargar
+
+### Añadido
+- **`scripts/block-asia.sh`** - Bloqueo a nivel kernel de 49 países asiáticos con `ipset` + `iptables`
+  - Descarga rangos CIDR agregados desde `ipdeny.com`, mínimo 30 000 CIDRs como umbral de validación
+  - Unit systemd + cron para refresco automático
+
+### Mejorado
+- **UI más densa** - Reducidos paddings, márgenes y tamaños de fuente en `base.html` (container, h1/h2/h3, nav)
+- **Emojis en labels de cards** - Visitas, IPs Únicas, CSP, Rate Limit, Bad Bots, Errores HTTP, SSH (Logins, Fallidos, Scanners), Fail2Ban
+- **Layout `nginx.html`/`ssh_vpn.html`/`ufw.html`** - Eliminadas clases `compact`/`chart-card-fill` redundantes ahora que el layout base ya es más compacto
+
 ## [2.7.0] - 2026-03-18
 
 ### Añadido

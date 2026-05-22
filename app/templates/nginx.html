@@ -40,27 +40,27 @@
 <div class="stats-grid">
     <div class="stat-card success">
         <div class="number" id="statVisits">-</div>
-        <div class="label">Visitas</div>
+        <div class="label">👁 Visitas</div>
     </div>
     <div class="stat-card info">
         <div class="number" id="statUniqueIps">-</div>
-        <div class="label">IPs Unicas</div>
+        <div class="label">🔗 IPs Unicas</div>
     </div>
     <div class="stat-card warning">
         <div class="number" id="statCsp">-</div>
-        <div class="label">Violaciones CSP</div>
+        <div class="label">⚠️ Violaciones CSP</div>
     </div>
     <div class="stat-card danger">
         <div class="number" id="statRateLimit">-</div>
-        <div class="label">Rate Limit</div>
+        <div class="label">🚫 Rate Limit</div>
     </div>
     <div class="stat-card danger">
         <div class="number" id="statBadBots">-</div>
-        <div class="label">Bad Bots (444)</div>
+        <div class="label">🤖 Bad Bots (444)</div>
     </div>
     <div class="stat-card">
         <div class="number" id="statErrors">-</div>
-        <div class="label">Errores HTTP</div>
+        <div class="label">❌ Errores HTTP</div>
     </div>
 </div>
 
@@ -82,13 +82,13 @@
 
 <!-- Charts Row 2: By App + Top IPs -->
 <div class="charts-row">
-    <div class="chart-card chart-card-fill">
+    <div class="chart-card">
         <h2>Visitas por Aplicacion</h2>
         <div class="chart-container-fill">
             <canvas id="chartByApp"></canvas>
         </div>
     </div>
-    <div class="top-ips-card compact">
+    <div class="top-ips-card">
         <h2>Top IPs Bloqueadas (Nginx)</h2>
         <div id="topIps">
             <div class="loading">Cargando...</div>
@@ -97,7 +97,7 @@
 </div>
 
 <!-- ========== FAIL2BAN SECTION ========== -->
-<h3>Fail2Ban - Bloqueo Automatico de IPs</h3>
+<h3>⛔ Fail2Ban - Bloqueo Automatico</h3>
 
 <!-- Fail2ban Stats Cards -->
 <div class="stats-grid-4">
@@ -137,13 +137,13 @@
 
 <!-- Fail2ban Top IPs -->
 <div class="charts-row">
-    <div class="top-ips-card compact">
+    <div class="top-ips-card">
         <h2>Top IPs Baneadas (Fail2Ban)</h2>
         <div id="topF2bBanned">
             <div class="loading">Cargando...</div>
         </div>
     </div>
-    <div class="top-ips-card compact">
+    <div class="top-ips-card">
         <h2>Top IPs por Intentos</h2>
         <div id="topF2bFounds">
             <div class="loading">Cargando...</div>
@@ -156,9 +156,9 @@
 
 <!-- Tabs -->
 <div class="tabs">
-    <button class="tab active" onclick="showTab('csp')">CSP Reports</button>
-    <button class="tab" onclick="showTab('nginx')">Nginx Logs</button>
-    <button class="tab" onclick="showTab('fail2ban')">Fail2Ban Events</button>
+    <button class="tab active" onclick="showTab('csp')">📋 CSP Reports</button>
+    <button class="tab" onclick="showTab('nginx')">📝 Nginx Logs</button>
+    <button class="tab" onclick="showTab('fail2ban')">⛔ Fail2Ban Events</button>
 </div>
 
 <!-- CSP Table -->
@@ -450,7 +450,10 @@
 
         charts.bySite = new Chart(document.getElementById('chartBySite'), {
             type: 'doughnut',
-            data: { labels: [], datasets: [{ data: [], backgroundColor: [chartColors.blue, chartColors.purple] }] },
+            data: { labels: [], datasets: [{ data: [], backgroundColor: [
+                chartColors.blue, chartColors.orange, chartColors.purple, chartColors.green, chartColors.red,
+                '#1abc9c', '#e91e63', '#00bcd4', '#ff7043', '#8d6e63', '#78909c', '#cddc39'
+            ] }] },
             options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: '#888' } } } }
         });
 

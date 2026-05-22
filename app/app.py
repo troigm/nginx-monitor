@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, render_template, Response
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from apscheduler.schedulers.background import BackgroundScheduler
 from functools import wraps
 
@@ -314,7 +315,7 @@ def parse_nginx_error_log(log_path='/var/log/nginx/error.log', last_lines=1000, 
                         'app': detect_app(uri, site=_site),
                         'log_type': log_type,
                         'client_ip': client_ip,
-                        'request_uri': uri,
+                        'request_uri': uri[:500] if uri else None,
                         'message': line.strip()[:500],
                         'raw_line': line.strip()
                     })
@@ -385,10 +386,10 @@ def parse_nginx_access_log(log_path='/var/log/nginx/access.log', last_lines=5000
                     'app': detect_app(uri, site=site),
                     'log_type': log_type,
                     'client_ip': client_ip,
-                    'request_uri': uri,
+                    'request_uri': uri[:500] if uri else None,
                     'status_code': status,
                     'user_agent': user_agent[:500] if user_agent else None,
-                    'message': f'{method} {uri} -> {status}',
+                    'message': f'{method} {uri} -> {status}'[:500],
                     'raw_line': line.strip()
                 })
     except Exception as e:
@@ -511,25 +512,21 @@ def sync_visits_internal():
     if not visit_data:
         return
 
-    # Batch: cargar todos los existentes de una sola query
-    timestamps = list({ts for (ts, _, _) in visit_data.keys()})
-    existing_map = {}
-    for rec in VisitStats.query.filter(VisitStats.timestamp.in_(timestamps)).all():
-        existing_map[(rec.timestamp, rec.site, rec.app)] = rec
-
-    for (hour_ts, site, app_name), data in visit_data.items():
-        existing = existing_map.get((hour_ts, site, app_name))
-        if existing:
-            if data['visits'] > existing.visits:
-                existing.visits = data['visits']
-                existing.unique_ips = len(data['ips'])
-        else:
-            db.session.add(VisitStats(
-                timestamp=hour_ts, site=site, app=app_name,
-                visits=data['visits'], unique_ips=len(data['ips'])
-            ))
+    rows = [
+        {'timestamp': hour_ts, 'site': site, 'app': app_name,
+         'visits': data['visits'], 'unique_ips': len(data['ips'])}
+        for (hour_ts, site, app_name), data in visit_data.items()
+    ]
+    stmt = pg_insert(VisitStats.__table__).values(rows)
+    stmt = stmt.on_conflict_do_update(
+        constraint='unique_hour_site_app',
+        set_={'visits': stmt.excluded.visits,
+              'unique_ips': stmt.excluded.unique_ips},
+        where=VisitStats.__table__.c.visits < stmt.excluded.visits,
+    )
 
     try:
+        db.session.execute(stmt)
         db.session.commit()
         app.logger.info(f"Synced visit stats for {len(visit_data)} hour/site/app combinations")
     except Exception as e:

@@ -4,38 +4,38 @@
 
 {% block content %}
 <!-- ========== SSH AUTH SECTION ========== -->
-<h3>Autenticacion SSH Real</h3>
-<p style="color: #7f8c8d; font-size: 0.9em; margin: -10px 0 15px 0;">Logins SSH reales desde /var/log/auth.log (autenticaciones exitosas y fallidas)</p>
+<h3>🔑 Autenticacion SSH Real</h3>
+<p style="color: #7f8c8d; font-size: 0.8em; margin: -6px 0 10px 0;">Logins SSH reales desde /var/log/auth.log (autenticaciones exitosas y fallidas)</p>
 
 <!-- SSH Auth Stats Cards -->
 <div class="stats-grid-4">
     <div class="stat-card success">
         <div class="number" id="statSshAccepted">-</div>
-        <div class="label">Logins Exitosos</div>
+        <div class="label">✅ Logins Exitosos</div>
     </div>
     <div class="stat-card" style="border-left-color: #e74c3c;">
         <div class="number" id="statSshFailed">-</div>
-        <div class="label">Logins Fallidos</div>
+        <div class="label">❌ Fallidos</div>
     </div>
     <div class="stat-card" style="border-left-color: #9b59b6;">
         <div class="number" id="statSshScanners">-</div>
-        <div class="label">Scanners/Bots</div>
+        <div class="label">🤖 Scanners/Bots</div>
     </div>
     <div class="stat-card info">
         <div class="number" id="statSshTotal">-</div>
-        <div class="label">Total Intentos</div>
+        <div class="label">📊 Total Intentos</div>
     </div>
 </div>
 
 <!-- SSH Auth IPs and Country Chart -->
 <div class="charts-row-3">
-    <div class="top-ips-card compact">
+    <div class="top-ips-card">
         <h2 style="color: #27ae60;">IPs con Login Exitoso</h2>
         <div id="topSshIpsAccepted">
             <div class="loading">Cargando...</div>
         </div>
     </div>
-    <div class="top-ips-card compact">
+    <div class="top-ips-card">
         <h2 style="color: #e74c3c;">IPs con Intentos Fallidos</h2>
         <div id="topSshIpsFailed">
             <div class="loading">Cargando...</div>
@@ -51,13 +51,13 @@
 
 <!-- SSH Auth Users -->
 <div class="charts-row">
-    <div class="top-ips-card compact">
+    <div class="top-ips-card">
         <h2 style="color: #27ae60;">Usuarios con Login Exitoso</h2>
         <div id="topSshUsersAccepted">
             <div class="loading">Cargando...</div>
         </div>
     </div>
-    <div class="top-ips-card compact">
+    <div class="top-ips-card">
         <h2 style="color: #e74c3c;">Usuarios Atacados (Fallidos)</h2>
         <div id="topSshUsersFailed">
             <div class="loading">Cargando...</div>
@@ -69,8 +69,8 @@
 <div class="section-divider"></div>
 
 <div class="tabs">
-    <button class="tab active" onclick="showSshTab('events')">Registro de Eventos SSH</button>
-    <button class="tab" onclick="showSshTab('blacklist')">IPs Baneadas Permanentemente</button>
+    <button class="tab active" onclick="showSshTab('events')">📋 Eventos SSH</button>
+    <button class="tab" onclick="showSshTab('blacklist')">⛔ IPs Baneadas Permanentemente</button>
 </div>
 
 <!-- SSH Events Table -->

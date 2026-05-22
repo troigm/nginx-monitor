@@ -368,6 +368,13 @@ python app.py
 - ✅ Parseo de access log completo (todos los status codes, filtro de bots/estáticos/IPs internas)
 - ✅ Clasificación mejorada: `access`, `http_4xx`, `http_5xx`, `bad_bot`, `http_429`
 
+### Robustez y UI compacta (v2.8.0)
+- ✅ Truncado defensivo `request_uri[:500]` y `message[:500]` para evitar abortos de batch INSERT por URIs largas de botnets
+- ✅ `sync_visits_internal` con `INSERT ... ON CONFLICT` (PostgreSQL upsert) — sin N+1 ni race
+- ✅ UI más densa (paddings/márgenes/fuentes reducidos) y emojis en labels de cards
+- ✅ Script nuevo `scripts/block-asia.sh` (bloqueo kernel-level de 49 países con ipset + iptables)
+- ✅ `scripts/manage-blacklist.sh` ya no sobrescribe `/etc/ipset.conf` con sets externos
+
 ## Uso de IP Lists
 
 ### Generar configuración Nginx

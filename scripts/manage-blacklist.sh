@@ -94,7 +94,7 @@ init_ipset() {
     log "ipset $IPSET_NAME inicializado con $count IPs"
 
     # Guardar configuración
-    ipset save > /etc/ipset.conf
+    ipset save manual-blacklist > /etc/ipset.conf
 
     echo -e "${GREEN}Blacklist inicializada correctamente${NC}"
 }
@@ -122,7 +122,7 @@ add_ip() {
     if ipset add "$IPSET_NAME" "$ip"; then
         # Guardar en archivo con descripción y fecha
         echo "${ip}|${desc}|$(date '+%Y-%m-%d %H:%M:%S')" >> "$BLACKLIST_FILE"
-        ipset save > /etc/ipset.conf
+        ipset save manual-blacklist > /etc/ipset.conf
         log "ADD: $ip - $desc"
         echo -e "${GREEN}IP $ip añadida a blacklist${NC}"
     else
@@ -142,7 +142,7 @@ remove_ip() {
         local temp_file=$(mktemp)
         grep -v "^${ip}|" "$BLACKLIST_FILE" > "$temp_file" || true
         mv "$temp_file" "$BLACKLIST_FILE"
-        ipset save > /etc/ipset.conf
+        ipset save manual-blacklist > /etc/ipset.conf
         log "REMOVE: $ip"
         echo -e "${GREEN}IP $ip eliminada de blacklist${NC}"
     else
@@ -228,7 +228,7 @@ import_ips() {
         fi
     done < "$file"
 
-    ipset save > /etc/ipset.conf
+    ipset save manual-blacklist > /etc/ipset.conf
     log "IMPORT: $file - añadidas: $added, omitidas: $skipped, inválidas: $invalid"
 
     echo -e "${GREEN}Importación completada${NC}"
