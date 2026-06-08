@@ -2,6 +2,20 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [2.9.0] - 2026-06-08
+
+### Añadido
+- **Página `/baneos` (Dashboard Fail2Ban)** - panel dedicado con stats (IPs baneadas, intentos, bans rate-limit/bad-bots), gráficas (bans por jail + timeline por hora), top IPs baneadas/intentos con geolocalización y tabla de eventos ordenable/filtrable/paginada
+  - Template `app/templates/baneos.html` autónomo (hereda helpers de `base.html`)
+  - Ruta `@app.route('/baneos')` en `app.py` y enlace ⛔ Baneos en el navbar (`base.html`)
+  - Reutiliza los endpoints existentes `/api/fail2ban-stats` y `/api/fail2ban-events` (sin cambios en el backend)
+
+### Cambiado
+- **Home (`nginx.html`) simplificada** - la sección Fail2Ban (stats, gráficas, top IPs, tab y tabla de eventos) se ha movido a `/baneos`; eliminado también todo su JavaScript asociado (sin referencias colgantes)
+
+### Seguridad
+- **Acceso a `/nginx-monitor` restringido por IP** - el `location` del vhost `sucemart.com` ahora aplica `allow` a la IP fija de oficina y a las redes VPN (`10.6.0.0/24`, `10.8.0.0/24`) + `deny all`, como segunda capa sobre el Basic Auth. Las IPs no autorizadas reciben `403` (configuración Nginx, fuera del repo)
+
 ## [2.8.0] - 2026-05-23
 
 ### Corregido

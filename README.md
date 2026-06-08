@@ -8,9 +8,15 @@ Dashboard de monitoreo de seguridad y tráfico web para servidores con Nginx, Fa
 - **Monitoreo de tráfico web**: Visitas, IPs únicas, estadísticas por sitio/aplicación
 - **Reportes CSP**: Recepción y visualización de violaciones Content Security Policy
 - **Logs de Nginx**: Errores, rate limiting, bad bots, códigos HTTP, User Agent
-- **Fail2Ban**: Eventos de ban/unban, intentos detectados por jail
 - **Top IPs bloqueadas** con etiquetas de tipo de bloqueo
 - **Tablas paginadas**: Navegación eficiente hasta 2000 entradas con filtro por IP
+
+### Página Baneos (Fail2Ban)
+- **Estadísticas de baneos**: IPs baneadas, intentos detectados, bans por rate-limit y bad-bots
+- **Gráficas**: Bans por jail (doughnut) y actividad Fail2Ban por hora (timeline)
+- **Top IPs**: Baneadas e intentos detectados, con jail y geolocalización
+- **Tabla de eventos**: Ordenable, filtrable por jail/evento/IP y paginada
+- **Acceso restringido**: solo IP de oficina y redes VPN (ver Seguridad)
 
 ### Página SSH/VPN
 - **Autenticación SSH real**: Logins exitosos y fallidos desde `/var/log/auth.log`
@@ -160,6 +166,7 @@ El endpoint `/csp-report` no requiere autenticación para permitir reportes del 
 | Endpoint | Descripción |
 |----------|-------------|
 | `/` | Dashboard Nginx (página principal) |
+| `/baneos` | Dashboard Baneos Fail2Ban |
 | `/ssh-vpn` | Dashboard SSH/VPN |
 | `/ufw` | Dashboard UFW Firewall |
 | `/ip-list` | Gestión IP Whitelist/Blacklist |
@@ -288,6 +295,7 @@ curl -u admin:password -X POST "https://tu-dominio/nginx-monitor/api/cleanup?mon
 ## Seguridad
 
 - Autenticación HTTP Basic en todos los endpoints excepto `/health` y `/csp-report`
+- **Acceso restringido por IP**: el `location /nginx-monitor/` del vhost solo permite la IP fija de oficina y las redes VPN (`allow ... ; deny all;`), como segunda capa sobre el Basic Auth
 - Contenedor ejecutado como usuario www-data (UID 33)
 - Logs montados en modo solo lectura
 - Puerto expuesto solo en localhost por defecto
@@ -374,6 +382,12 @@ python app.py
 - ✅ UI más densa (paddings/márgenes/fuentes reducidos) y emojis en labels de cards
 - ✅ Script nuevo `scripts/block-asia.sh` (bloqueo kernel-level de 49 países con ipset + iptables)
 - ✅ `scripts/manage-blacklist.sh` ya no sobrescribe `/etc/ipset.conf` con sets externos
+
+### Página Baneos y acceso restringido (v2.9.0)
+- ✅ Panel Fail2Ban movido de la home a su propia página `/baneos` (template `baneos.html` autónomo)
+- ✅ Home (`nginx.html`) simplificada: sin la sección Fail2Ban ni su JS
+- ✅ Reutiliza los endpoints existentes `/api/fail2ban-stats` y `/api/fail2ban-events` (backend intacto)
+- ✅ Acceso a `/nginx-monitor` restringido por Nginx a IP de oficina + redes VPN (`allow/deny`)
 
 ## Uso de IP Lists
 

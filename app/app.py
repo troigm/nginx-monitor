@@ -2049,6 +2049,12 @@ def ufw():
     """Dashboard UFW Firewall"""
     return render_template('ufw.html', active_page='ufw')
 
+@app.route('/baneos')
+@requires_auth
+def baneos():
+    """Dashboard Baneos Fail2Ban"""
+    return render_template('baneos.html', active_page='baneos')
+
 
 @app.route('/health')
 def health():

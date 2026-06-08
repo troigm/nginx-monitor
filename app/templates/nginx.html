@@ -96,61 +96,6 @@
     </div>
 </div>
 
-<!-- ========== FAIL2BAN SECTION ========== -->
-<h3>⛔ Fail2Ban - Bloqueo Automatico</h3>
-
-<!-- Fail2ban Stats Cards -->
-<div class="stats-grid-4">
-    <div class="stat-card danger">
-        <div class="number" id="statF2bBans">-</div>
-        <div class="label">IPs Baneadas</div>
-    </div>
-    <div class="stat-card warning">
-        <div class="number" id="statF2bFounds">-</div>
-        <div class="label">Intentos Detectados</div>
-    </div>
-    <div class="stat-card info">
-        <div class="number" id="statF2bLimitReq">-</div>
-        <div class="label">Bans Rate Limit</div>
-    </div>
-    <div class="stat-card">
-        <div class="number" id="statF2bBadBots">-</div>
-        <div class="label">Bans Bad Bots</div>
-    </div>
-</div>
-
-<!-- Fail2ban Charts -->
-<div class="charts-row">
-    <div class="chart-card">
-        <h2>Bans por Jail</h2>
-        <div class="chart-container">
-            <canvas id="chartF2bByJail"></canvas>
-        </div>
-    </div>
-    <div class="chart-card">
-        <h2>Actividad Fail2Ban por Hora</h2>
-        <div class="chart-container">
-            <canvas id="chartF2bTimeline"></canvas>
-        </div>
-    </div>
-</div>
-
-<!-- Fail2ban Top IPs -->
-<div class="charts-row">
-    <div class="top-ips-card">
-        <h2>Top IPs Baneadas (Fail2Ban)</h2>
-        <div id="topF2bBanned">
-            <div class="loading">Cargando...</div>
-        </div>
-    </div>
-    <div class="top-ips-card">
-        <h2>Top IPs por Intentos</h2>
-        <div id="topF2bFounds">
-            <div class="loading">Cargando...</div>
-        </div>
-    </div>
-</div>
-
 <!-- ========== TABS SECTION ========== -->
 <div class="section-divider"></div>
 
@@ -158,7 +103,6 @@
 <div class="tabs">
     <button class="tab active" onclick="showTab('csp')">📋 CSP Reports</button>
     <button class="tab" onclick="showTab('nginx')">📝 Nginx Logs</button>
-    <button class="tab" onclick="showTab('fail2ban')">⛔ Fail2Ban Events</button>
 </div>
 
 <!-- CSP Table -->
@@ -228,56 +172,19 @@
     </table>
 </div>
 
-<!-- Fail2Ban Events Table -->
-<div id="tabFail2ban" class="table-container" style="display:none;">
-    <div class="table-filters">
-        <label>Jail:</label>
-        <select id="filterF2bJail" onchange="applyTableFilters('fail2ban')">
-            <option value="">Todas</option>
-        </select>
-        <label style="margin-left:15px">Evento:</label>
-        <select id="filterF2bEvent" onchange="applyTableFilters('fail2ban')">
-            <option value="">Todos</option>
-            <option value="found">Found</option>
-            <option value="ban">Ban</option>
-            <option value="unban">Unban</option>
-        </select>
-        <label style="margin-left:15px">IP:</label>
-        <input type="text" id="filterF2bIp" placeholder="Filtrar por IP" style="padding:4px 8px;border:1px solid #444;background:#1a1a2e;color:#ddd;border-radius:4px">
-        <button onclick="loadFail2banEvents()" style="margin-left:8px;padding:4px 12px;background:#4a5568;color:#fff;border:none;border-radius:4px;cursor:pointer">Buscar</button>
-        <span class="filter-count" id="fail2banCount"></span>
-    </div>
-    <div class="pagination-controls" id="fail2banPagination" style="margin-bottom:10px"></div>
-    <table>
-        <thead>
-            <tr>
-                <th class="sortable" data-table="fail2ban" data-field="timestamp" data-type="date">Fecha</th>
-                <th class="sortable" data-table="fail2ban" data-field="jail" data-type="string">Jail</th>
-                <th class="sortable" data-table="fail2ban" data-field="event_type" data-type="string">Evento</th>
-                <th class="sortable" data-table="fail2ban" data-field="ip" data-type="string">IP</th>
-                <th>Pais</th>
-            </tr>
-        </thead>
-        <tbody id="fail2banTableBody">
-            <tr><td colspan="5" class="loading">Cargando...</td></tr>
-        </tbody>
-    </table>
-</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
     let currentTab = 'csp';
-    const tableData = { csp: [], nginx: [], fail2ban: [] };
+    const tableData = { csp: [], nginx: [] };
     const paginationState = {
         csp: { page: 1, totalPages: 1, totalRecords: 0 },
-        nginx: { page: 1, totalPages: 1, totalRecords: 0 },
-        fail2ban: { page: 1, totalPages: 1, totalRecords: 0 }
+        nginx: { page: 1, totalPages: 1, totalRecords: 0 }
     };
     const sortState = {
         csp: { field: 'timestamp', direction: 'desc' },
-        nginx: { field: 'timestamp', direction: 'desc' },
-        fail2ban: { field: 'timestamp', direction: 'desc' }
+        nginx: { field: 'timestamp', direction: 'desc' }
     };
 
     function showTab(tab) {
@@ -286,7 +193,6 @@
         document.querySelector(`.tab[onclick="showTab('${tab}')"]`).classList.add('active');
         document.getElementById('tabCsp').style.display = tab === 'csp' ? 'block' : 'none';
         document.getElementById('tabNginx').style.display = tab === 'nginx' ? 'block' : 'none';
-        document.getElementById('tabFail2ban').style.display = tab === 'fail2ban' ? 'block' : 'none';
     }
 
     function sortData(data, field, direction, type) {
@@ -338,13 +244,6 @@
             if (status) data = data.filter(r => r.status_code == status);
             renderNginxTable(data);
             document.getElementById('nginxCount').textContent = `${data.length} registros`;
-        } else if (table === 'fail2ban') {
-            const jail = document.getElementById('filterF2bJail').value;
-            const event = document.getElementById('filterF2bEvent').value;
-            if (jail) data = data.filter(r => r.jail === jail);
-            if (event) data = data.filter(r => r.event_type === event);
-            renderFail2banTable(data);
-            document.getElementById('fail2banCount').textContent = `${data.length} registros`;
         }
     }
 
@@ -368,7 +267,6 @@
         paginationState[table].page = newPage;
         if (table === 'csp') loadCspReports();
         else if (table === 'nginx') loadNginxLogs();
-        else if (table === 'fail2ban') loadFail2banEvents();
     }
 
     function renderCspTable(data) {
@@ -409,28 +307,6 @@
         `).join('');
     }
 
-    async function renderFail2banTable(data) {
-        const tbody = document.getElementById('fail2banTableBody');
-        if (data.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" class="empty">No hay eventos de Fail2Ban</td></tr>';
-            return;
-        }
-        const ips = data.map(r => r.ip);
-        await getGeoInfoBatch(ips);
-        tbody.innerHTML = data.map(r => {
-            const geo = geoCache[r.ip] || { flag: '', country: '' };
-            return `
-                <tr>
-                    <td class="mono">${formatDate(r.timestamp)}</td>
-                    <td>${getJailBadge(r.jail)}</td>
-                    <td>${getEventBadge(r.event_type)}</td>
-                    <td class="mono">${r.ip}</td>
-                    <td>${geo.flag} ${geo.country}</td>
-                </tr>
-            `;
-        }).join('');
-    }
-
     function initCharts() {
         const defaultOptions = {
             responsive: true,
@@ -461,18 +337,6 @@
             type: 'bar',
             data: { labels: [], datasets: [{ data: [], backgroundColor: [chartColors.blue, chartColors.orange, chartColors.purple] }] },
             options: { ...defaultOptions, plugins: { legend: { display: false } } }
-        });
-
-        charts.f2bByJail = new Chart(document.getElementById('chartF2bByJail'), {
-            type: 'doughnut',
-            data: { labels: [], datasets: [{ data: [], backgroundColor: [chartColors.red, chartColors.orange, chartColors.purple, chartColors.blue] }] },
-            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: '#888' } } } }
-        });
-
-        charts.f2bTimeline = new Chart(document.getElementById('chartF2bTimeline'), {
-            type: 'line',
-            data: { labels: [], datasets: [] },
-            options: defaultOptions
         });
     }
 
@@ -544,58 +408,6 @@
         } catch (e) { console.error('Error loading timeline:', e); }
     }
 
-    async function loadFail2banStats() {
-        const f = getFilters();
-        const params = new URLSearchParams({ hours: f.hours });
-        try {
-            const res = await apiFetch(`${basePath}/api/fail2ban-stats?${params}`);
-            const data = await res.json();
-            document.getElementById('statF2bBans').textContent = formatNumber(data.totals.bans);
-            document.getElementById('statF2bFounds').textContent = formatNumber(data.totals.founds);
-            const limitReq = data.bans_by_jail.find(j => j.jail.includes('limit-req'))?.count || 0;
-            const badBots = data.bans_by_jail.find(j => j.jail.includes('badbots'))?.count || 0;
-            document.getElementById('statF2bLimitReq').textContent = formatNumber(limitReq);
-            document.getElementById('statF2bBadBots').textContent = formatNumber(badBots);
-
-            charts.f2bByJail.data.labels = data.bans_by_jail.map(j => j.jail);
-            charts.f2bByJail.data.datasets[0].data = data.bans_by_jail.map(j => j.count);
-            charts.f2bByJail.update();
-
-            if (data.timeline && data.timeline.length > 0) {
-                charts.f2bTimeline.data.labels = data.timeline.map(t => t.timestamp.split(' ')[1] || t.timestamp);
-                charts.f2bTimeline.data.datasets = [
-                    { label: 'Bans', data: data.timeline.map(t => t.ban || 0), borderColor: chartColors.red, backgroundColor: chartColors.redFade, fill: true },
-                    { label: 'Founds', data: data.timeline.map(t => t.found || 0), borderColor: chartColors.orange, backgroundColor: chartColors.orangeFade, fill: true }
-                ];
-                charts.f2bTimeline.update();
-            }
-
-            if (data.top_banned_ips && data.top_banned_ips.length > 0) {
-                const ips = data.top_banned_ips.map(item => item.ip);
-                await getGeoInfoBatch(ips);
-                document.getElementById('topF2bBanned').innerHTML = data.top_banned_ips.map(item => {
-                    const geo = geoCache[item.ip] || { flag: '', country: '' };
-                    const timeStr = item.last_seen ? `<span class="ip-time">${formatTime(item.last_seen)}</span>` : '';
-                    return `<div class="ip-row"><div class="ip-info"><span class="ip-flag">${geo.flag}</span><div><div class="ip-address">${item.ip}</div><div class="ip-country">${geo.country}${timeStr}</div></div></div><div class="ip-badges">${getJailBadge(item.jail)}<span class="ip-count">${item.count}</span></div></div>`;
-                }).join('');
-            } else {
-                document.getElementById('topF2bBanned').innerHTML = '<div class="empty">Sin IPs baneadas</div>';
-            }
-
-            if (data.top_found_ips && data.top_found_ips.length > 0) {
-                const ips = data.top_found_ips.map(item => item.ip);
-                await getGeoInfoBatch(ips);
-                document.getElementById('topF2bFounds').innerHTML = data.top_found_ips.map(item => {
-                    const geo = geoCache[item.ip] || { flag: '', country: '' };
-                    const timeStr = item.last_seen ? `<span class="ip-time">${formatTime(item.last_seen)}</span>` : '';
-                    return `<div class="ip-row"><div class="ip-info"><span class="ip-flag">${geo.flag}</span><div><div class="ip-address">${item.ip}</div><div class="ip-country">${geo.country}${timeStr}</div></div></div><div class="ip-badges">${getJailBadge(item.jail)}<span class="ip-count warning">${item.count}</span></div></div>`;
-                }).join('');
-            } else {
-                document.getElementById('topF2bFounds').innerHTML = '<div class="empty">Sin intentos detectados</div>';
-            }
-        } catch (e) { console.error('Error loading fail2ban stats:', e); }
-    }
-
     async function loadCspReports() {
         const f = getFilters();
         const page = paginationState.csp.page;
@@ -643,35 +455,12 @@
         } catch (e) { console.error('Error loading nginx logs:', e); }
     }
 
-    async function loadFail2banEvents() {
-        const f = getFilters();
-        const page = paginationState.fail2ban.page;
-        const ipFilter = document.getElementById('filterF2bIp').value.trim();
-        const params = new URLSearchParams({ hours: f.hours, limit: 100, page: page, ip: ipFilter });
-        try {
-            const res = await apiFetch(`${basePath}/api/fail2ban-events?${params}`);
-            const response = await res.json();
-            tableData.fail2ban = response.data || [];
-            paginationState.fail2ban = {
-                page: response.pagination.page,
-                totalPages: response.pagination.total_pages,
-                totalRecords: response.pagination.total_records
-            };
-            const jails = [...new Set(tableData.fail2ban.map(r => r.jail))];
-            document.getElementById('filterF2bJail').innerHTML = '<option value="">Todas</option>' + jails.map(j => `<option value="${j}">${j}</option>`).join('');
-            renderPagination('fail2ban', paginationState.fail2ban);
-            applyTableFilters('fail2ban');
-        } catch (e) { console.error('Error loading fail2ban events:', e); }
-    }
-
     async function loadPageData() {
         await Promise.all([
             loadDashboardStats(),
-            loadFail2banStats(),
             loadTimeline(),
             loadCspReports(),
-            loadNginxLogs(),
-            loadFail2banEvents()
+            loadNginxLogs()
         ]);
     }
 
