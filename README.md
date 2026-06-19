@@ -35,6 +35,8 @@ Dashboard de monitoreo de seguridad y tráfico web para servidores con Nginx, Fa
 - **Tabla de eventos UFW**: Ordenable, filtrable por acción/proto/puerto/IP y paginada
 
 ### Página IP Lists
+> **Nota de despliegue:** esta página (`/ip-list`, `ip_list.html`) y sus endpoints `/api/ip-list*` están documentados pero **NO forman parte del build desplegado** en Sucemart (no existe el template ni la ruta). La gestión de listas se hace hoy por `scripts/manage-blacklist.sh` + `systemd/nginx-ip-reload.*`. Ver [Incidencias conocidas](#incidencias-conocidas).
+
 - **Gestion de Whitelist/Blacklist**: CRUD completo de IPs
 - **Validacion IPv4/IPv6**: Verificacion de formato de IP
 - **Importacion/Exportacion CSV**: Carga masiva y backup de listas
@@ -417,7 +419,7 @@ curl -u admin:password -X POST "https://tu-dominio/nginx-monitor/api/cleanup?mon
 - Dependencias actualizadas sin vulnerabilidades conocidas
 - Límites de recursos Docker para evitar DoS
 - `no-new-privileges:true` en ambos contenedores (bloquea escalada vía binarios setuid)
-- Postgres ejecutándose como UID 70 explícito (no root)
+- Postgres usa el entrypoint estándar (arranca como root y baja a `postgres`/UID 70). El `user: "70:70"` explícito que proponía una rama paralela **se omitió** por incompatibilidad con el volumen de datos vigente (ver [Incidencias conocidas](#incidencias-conocidas))
 
 ### Recomendaciones de despliegue
 
@@ -432,19 +434,33 @@ curl -u admin:password -X POST "https://tu-dominio/nginx-monitor/api/cleanup?mon
   y jail `nginx-monitor-auth` de fail2ban para brute-force sobre BasicAuth.
 - **Restringir el path a la VPN de administración** si no es necesario que el
   dashboard sea accesible públicamente.
-- **Backup automático**: el proyecto está integrado en el backup maestro
-  `/opt/docker-projects/backups/backup_all.sh` (cron diario 03:00 UTC del usuario
-  `troig`). Los dumps comprimidos con `zstd --ultra -22` se guardan en
-  `/opt/docker-projects/backups/nginx-monitor/` con retención 10 días. La base
-  de ~2 GB comprime a ~45 MB por dump.
-  Restaurar un dump:
-  ```bash
-  cd /opt/docker-projects/nginx-monitor
-  docker compose exec -T postgres psql -U monitor -d postgres \
-      -c 'DROP DATABASE IF EXISTS monitor; CREATE DATABASE monitor;'
-  zstd -dc /opt/docker-projects/backups/nginx-monitor/postgres_YYYYMMDD_HHMMSS.sql.zst \
-      | docker compose exec -T postgres psql -U monitor -d monitor
-  ```
+- **Backup automático** (despliegue Sucemart): el repo vive en
+  `/opt/docker/nginx-monitor` y queda cubierto por el sistema de backup unificado
+  del servidor (crontab del usuario `troig`): `run-backup.sh` (02:00, todos los
+  proyectos Docker), `run-qnap-sync.sh` (06:05, sync a QNAP), `run-restic.sh`
+  (07:00, Restic → Hetzner Storage Box) y `backup-watchdog.sh` (09:30, dead-man's
+  switch). Es decir: copias locales + QNAP + Restic.
+  > La ruta `/opt/docker-projects/...` que aparecía aquí en versiones previas del
+  > README **no existe** en este servidor; el backup real es el descrito arriba.
+
+## Incidencias conocidas
+
+- **Persistencia de PostgreSQL en volumen anónimo (pendiente de migrar).** Con
+  `postgres:18-alpine` el `PGDATA` por defecto es `/var/lib/postgresql/18/docker`,
+  pero el `docker-compose.yml` monta el volumen nombrado `postgres_data` en
+  `/var/lib/postgresql/data` (convención pre-18, queda **vacío**). Los datos reales
+  acaban en el **volumen anónimo** que la imagen crea sobre `/var/lib/postgresql`.
+  Persisten en restart, pero un `docker compose down -v` o ciertos recreates podrían
+  orphanlos. Mitigado por los backups lógicos. **Plan de migración**: parar el stack,
+  `pg_dump` + copia en frío del volumen, mover los datos al volumen nombrado
+  (montándolo en `/var/lib/postgresql`, manteniendo el `PGDATA` por defecto) y
+  verificar. **No ejecutar `docker compose down -v` ni recrear postgres sin dump previo.**
+- **Sección VPN sin datos por falta del cron host-side.** Los endpoints
+  `/api/vpn-stats` y `/api/vpn-peers` necesitan el volcado periódico descrito en
+  "VPN setup (host-side)"; mientras `/etc/cron.d/nginx-monitor-vpn` no exista,
+  devuelven listas vacías.
+- **Página IP Lists no desplegada** (ver nota en Características): el código de
+  `/ip-list` no está en el build actual.
 
 ## Desarrollo
 

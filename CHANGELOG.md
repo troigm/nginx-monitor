@@ -2,6 +2,32 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [2.10.1] - 2026-06-19
+
+Correcciones de documentación (sin cambios de código de la app) y registro de
+una incidencia operativa conocida.
+
+### Documentación
+- Corregida la sección de **backup** del README: la ruta `/opt/docker-projects/...`
+  no existe en el servidor; el backup real es el sistema unificado (`run-backup.sh`
+  02:00 + `run-restic.sh` 07:00 a Hetzner Storage Box + `run-qnap-sync.sh` + watchdog).
+- Corregida la afirmación de que postgres corre como `user: "70:70"`: ese cambio
+  se **omitió** en v2.10.0 por incompatibilidad con el volumen de datos vigente.
+- Aclarado que la **página IP Lists** (`/ip-list`, `ip_list.html`, `/api/ip-list*`)
+  está documentada pero **no desplegada** en este build.
+- Documentada la **sección VPN sin datos** mientras no exista el cron host-side
+  (`/etc/cron.d/nginx-monitor-vpn`).
+- Nueva sección "Incidencias conocidas" en el README.
+
+### Conocido / pendiente
+- **Persistencia de PostgreSQL en volumen anónimo.** Con `postgres:18-alpine` el
+  `PGDATA` por defecto es `/var/lib/postgresql/18/docker` (volumen anónimo), mientras
+  el volumen nombrado `postgres_data` se monta en `/var/lib/postgresql/data` y queda
+  vacío. Persiste en restart y está cubierto por backups lógicos, pero un
+  `docker compose down -v`/recreate podría perder datos. Migración planificada
+  (`pg_dump` + copia en frío → mover al volumen nombrado en `/var/lib/postgresql`,
+  manteniendo el `PGDATA` por defecto). **No recrear postgres sin dump previo.**
+
 ## [2.10.0] - 2026-06-19
 
 Reintegración de las dos líneas divergentes que partían de v2.7.0 en una
