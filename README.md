@@ -445,16 +445,14 @@ curl -u admin:password -X POST "https://tu-dominio/nginx-monitor/api/cleanup?mon
 
 ## Incidencias conocidas
 
-- **Persistencia de PostgreSQL en volumen anónimo (pendiente de migrar).** Con
-  `postgres:18-alpine` el `PGDATA` por defecto es `/var/lib/postgresql/18/docker`,
-  pero el `docker-compose.yml` monta el volumen nombrado `postgres_data` en
-  `/var/lib/postgresql/data` (convención pre-18, queda **vacío**). Los datos reales
-  acaban en el **volumen anónimo** que la imagen crea sobre `/var/lib/postgresql`.
-  Persisten en restart, pero un `docker compose down -v` o ciertos recreates podrían
-  orphanlos. Mitigado por los backups lógicos. **Plan de migración**: parar el stack,
-  `pg_dump` + copia en frío del volumen, mover los datos al volumen nombrado
-  (montándolo en `/var/lib/postgresql`, manteniendo el `PGDATA` por defecto) y
-  verificar. **No ejecutar `docker compose down -v` ni recrear postgres sin dump previo.**
+- **Persistencia de PostgreSQL — RESUELTO (v2.10.2, 2026-06-19).** Los datos se
+  migraron del volumen anónimo al volumen nombrado `postgres_data`, ahora montado
+  en `/var/lib/postgresql` (con el `PGDATA` por defecto de postgres 18). Migración
+  por copia en frío del clúster + `pg_dump`/tar de respaldo previos, verificada sin
+  pérdida (row counts intactos, 14 endpoints 200). El volumen anónimo antiguo se
+  conserva unos días como red de seguridad antes de borrarlo. *(Histórico: antes
+  los datos vivían en un volumen anónimo porque el mount apuntaba a
+  `/var/lib/postgresql/data`, que en postgres 18 queda vacío.)*
 - **Sección VPN sin datos por falta del cron host-side.** Los endpoints
   `/api/vpn-stats` y `/api/vpn-peers` necesitan el volcado periódico descrito en
   "VPN setup (host-side)"; mientras `/etc/cron.d/nginx-monitor-vpn` no exista,

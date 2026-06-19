@@ -2,6 +2,20 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [2.10.2] - 2026-06-19
+
+### Corregido
+- **Persistencia de PostgreSQL migrada al volumen nombrado** (cierra la incidencia
+  de v2.10.1). Los datos se movieron del volumen anónimo a
+  `nginx-monitor_postgres_data`, ahora montado en `/var/lib/postgresql` (con el
+  `PGDATA` por defecto de postgres 18, sin override). Método: copia en frío del
+  clúster con el stack parado, precedida de `pg_dump -Fc` verificado + `tar` del
+  volumen como respaldo. Verificado **sin pérdida** (row counts intactos, postgres
+  arranca sin `initdb`, 14 endpoints a 200). `docker-compose.yml`: el mount de
+  postgres pasa de `postgres_data:/var/lib/postgresql/data` a
+  `postgres_data:/var/lib/postgresql`. El volumen anónimo antiguo se conserva unos
+  días como red de seguridad antes de borrarlo.
+
 ## [2.10.1] - 2026-06-19
 
 Correcciones de documentación (sin cambios de código de la app) y registro de

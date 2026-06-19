@@ -61,7 +61,7 @@ services:
     security_opt:
       - no-new-privileges:true
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
     environment:
       - POSTGRES_USER=monitor
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me-in-production}
