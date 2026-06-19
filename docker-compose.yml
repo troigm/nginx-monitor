@@ -6,6 +6,8 @@ services:
     user: "33:33"  # www-data para poder leer logs de nginx
     group_add:
       - "4"  # grupo adm para leer logs de fail2ban
+    security_opt:
+      - no-new-privileges:true
     ports:
       - "127.0.0.1:5000:5000"
     volumes:
@@ -15,6 +17,7 @@ services:
       - /var/log/ufw.log:/var/log/ufw.log:ro
       - /var/log/auth.log:/var/log/auth.log:ro
       - /etc/fail2ban/ip.blacklist:/etc/fail2ban/ip.blacklist:ro
+      - /var/log/nginx-monitor:/var/log/nginx-monitor:ro
     environment:
       - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
       - AUTH_USER=${AUTH_USER:-admin}
@@ -24,6 +27,8 @@ services:
       - MONITOR_APPS=${MONITOR_APPS:-}
       - MONITOR_LOG_MAP=${MONITOR_LOG_MAP:-}
       - MONITOR_SITE_APP=${MONITOR_SITE_APP:-}
+      - MONITOR_SELF_PATH=${MONITOR_SELF_PATH:-/nginx-monitor/}
+      - MONITOR_ADMIN_PATHS=${MONITOR_ADMIN_PATHS:-/wp-admin/,/wp-login.php,/admin/}
       - MONITOR_SSH_PORTS=${MONITOR_SSH_PORTS:-}
       - MONITOR_VPN_PORTS=${MONITOR_VPN_PORTS:-}
     depends_on:
@@ -53,6 +58,8 @@ services:
     image: postgres:18-alpine
     container_name: nginx-monitor-postgres
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:

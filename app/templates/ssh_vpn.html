@@ -65,6 +65,62 @@
     </div>
 </div>
 
+<!-- ========== VPN SECTION ========== -->
+<div class="section-divider"></div>
+<h3>VPN - OpenVPN + WireGuard</h3>
+
+<!-- VPN Stats Cards -->
+<div class="stats-grid-4">
+    <div class="stat-card success">
+        <div class="number" id="statVpnSuccess">-</div>
+        <div class="label">VPN Conexiones OK</div>
+    </div>
+    <div class="stat-card" style="border-left-color: #e74c3c;">
+        <div class="number" id="statVpnFailed">-</div>
+        <div class="label">VPN Auth Fallidas</div>
+    </div>
+    <div class="stat-card info">
+        <div class="number" id="statVpnWgActive">-</div>
+        <div class="label">Peers WireGuard Activos</div>
+    </div>
+    <div class="stat-card" style="border-left-color: #f39c12;">
+        <div class="number" id="statVpnUfwBlocks">-</div>
+        <div class="label">Bloqueos UFW Puertos VPN</div>
+    </div>
+</div>
+
+<!-- VPN Row 1: OpenVPN top users + failed IPs -->
+<div class="charts-row">
+    <div class="top-ips-card compact">
+        <h2 style="color: #27ae60;">Top Usuarios OpenVPN</h2>
+        <div id="topVpnUsersOk">
+            <div class="loading">Cargando...</div>
+        </div>
+    </div>
+    <div class="top-ips-card compact">
+        <h2 style="color: #e74c3c;">Top IPs OpenVPN Fallidas</h2>
+        <div id="topVpnIpsFailed">
+            <div class="loading">Cargando...</div>
+        </div>
+    </div>
+</div>
+
+<!-- VPN Row 2: WireGuard peers + UFW blocks -->
+<div class="charts-row">
+    <div class="top-ips-card compact">
+        <h2>Peers WireGuard</h2>
+        <div id="wgPeers">
+            <div class="loading">Cargando...</div>
+        </div>
+    </div>
+    <div class="top-ips-card compact">
+        <h2 style="color: #f39c12;">Bloqueos UFW a Puertos VPN</h2>
+        <div id="vpnUfwBlocks">
+            <div class="loading">Cargando...</div>
+        </div>
+    </div>
+</div>
+
 <!-- ========== SSH EVENTS TABS ========== -->
 <div class="section-divider"></div>
 
@@ -471,10 +527,168 @@
         }).join('');
     }
 
+    function formatBytes(n) {
+        if (!n || n < 1024) return (n || 0) + ' B';
+        const units = ['KB', 'MB', 'GB', 'TB'];
+        let v = n / 1024, i = 0;
+        while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+        return v.toFixed(v < 10 ? 1 : 0) + ' ' + units[i];
+    }
+
+    function formatRelative(iso) {
+        if (!iso) return 'nunca';
+        const d = new Date(iso), now = new Date();
+        const s = Math.max(0, Math.floor((now - d) / 1000));
+        if (s < 60) return 'hace ' + s + 's';
+        if (s < 3600) return 'hace ' + Math.floor(s / 60) + 'm';
+        if (s < 86400) return 'hace ' + Math.floor(s / 3600) + 'h';
+        return 'hace ' + Math.floor(s / 86400) + 'd';
+    }
+
+    // Considera un peer WG "activo" si tuvo handshake en las ultimas 3 minutos
+    // (default WireGuard hace keepalive cada 25s o mas con persistent-keepalive).
+    function isWgPeerActive(handshakeIso) {
+        if (!handshakeIso) return false;
+        const ageSec = (Date.now() - new Date(handshakeIso).getTime()) / 1000;
+        return ageSec < 180;
+    }
+
+    async function loadVpnStats() {
+        const f = getFilters();
+        const params = new URLSearchParams({ hours: f.hours });
+        try {
+            const res = await apiFetch(`${basePath}/api/vpn-stats?${params}`);
+            const data = await res.json();
+            document.getElementById('statVpnSuccess').textContent = formatNumber(data.totals.success || 0);
+            document.getElementById('statVpnFailed').textContent = formatNumber(data.totals.failure || 0);
+
+            const usersOkBox = document.getElementById('topVpnUsersOk');
+            if (!data.top_users_ok.length) {
+                usersOkBox.innerHTML = '<div class="empty">Sin actividad</div>';
+            } else {
+                usersOkBox.innerHTML = data.top_users_ok.map(u => `
+                    <div class="ip-row">
+                        <div class="ip-info">
+                            <div><div class="ip-address">${u.username || '-'}</div></div>
+                        </div>
+                        <span class="ip-count">${formatNumber(u.count)}</span>
+                    </div>`).join('');
+            }
+
+            const ipsFailedBox = document.getElementById('topVpnIpsFailed');
+            if (!data.top_ips_failed.length) {
+                ipsFailedBox.innerHTML = '<div class="empty">Sin fallos</div>';
+            } else {
+                const ips = data.top_ips_failed.map(i => i.ip);
+                await getGeoInfoBatch(ips);
+                ipsFailedBox.innerHTML = data.top_ips_failed.map(item => {
+                    const geo = geoCache[item.ip] || { flag: '', country: '' };
+                    return `<div class="ip-row">
+                        <div class="ip-info">
+                            <span class="ip-flag">${geo.flag}</span>
+                            <div>
+                                <div class="ip-address">${item.ip}</div>
+                                <div class="ip-country">${geo.country}</div>
+                            </div>
+                        </div>
+                        <span class="ip-count">${formatNumber(item.count)}</span>
+                    </div>`;
+                }).join('');
+            }
+        } catch (e) {
+            console.error('Error loading VPN stats:', e);
+        }
+    }
+
+    async function loadVpnPeers() {
+        try {
+            const res = await apiFetch(`${basePath}/api/vpn-peers`);
+            const data = await res.json();
+            const wgBox = document.getElementById('wgPeers');
+            const wg = data.wireguard || [];
+            const ovpnClients = (data.openvpn && data.openvpn.clients) || [];
+
+            // El contador de "activos" suma OpenVPN conectados + WG con handshake reciente.
+            const wgActive = wg.filter(p => isWgPeerActive(p.last_handshake)).length;
+            document.getElementById('statVpnWgActive').textContent = formatNumber(wgActive + ovpnClients.length);
+
+            // Combinar para la lista: primero clientes OpenVPN conectados, luego peers WG.
+            const rows = [];
+            ovpnClients.forEach(c => {
+                rows.push(`<div class="ip-row">
+                    <div class="ip-info">
+                        <span class="badge badge-allow">OVPN</span>
+                        <div>
+                            <div class="ip-address">${c.common_name}</div>
+                            <div class="ip-country">${c.real_address} &middot; ${formatBytes(c.bytes_recv)} ↓ / ${formatBytes(c.bytes_sent)} ↑</div>
+                        </div>
+                    </div>
+                    <span class="ip-count">activo</span>
+                </div>`);
+            });
+            wg.forEach(p => {
+                const active = isWgPeerActive(p.last_handshake);
+                const badgeCls = active ? 'badge-allow' : 'badge-audit';
+                const handshakeTxt = formatRelative(p.last_handshake);
+                const transfer = `${formatBytes(p.bytes_recv)} ↓ / ${formatBytes(p.bytes_sent)} ↑`;
+                rows.push(`<div class="ip-row">
+                    <div class="ip-info">
+                        <span class="badge ${badgeCls}">${p.interface.toUpperCase()}</span>
+                        <div>
+                            <div class="ip-address" title="${p.public_key}">${p.public_key.slice(0, 12)}…</div>
+                            <div class="ip-country">${p.endpoint || 'sin endpoint'} &middot; ${transfer} &middot; ${handshakeTxt}</div>
+                        </div>
+                    </div>
+                    <span class="ip-count ${active ? '' : 'warning'}">${active ? 'activo' : 'inactivo'}</span>
+                </div>`);
+            });
+
+            wgBox.innerHTML = rows.length
+                ? rows.join('')
+                : '<div class="empty">Sin peers VPN</div>';
+        } catch (e) {
+            console.error('Error loading VPN peers:', e);
+        }
+    }
+
+    async function loadVpnUfwBlocks() {
+        const f = getFilters();
+        const params = new URLSearchParams({ hours: f.hours });
+        const box = document.getElementById('vpnUfwBlocks');
+        try {
+            const res = await apiFetch(`${basePath}/api/ufw-vpn-stats?${params}`);
+            const data = await res.json();
+            const byPort = data.by_port || [];
+            const totalBlocks = byPort.reduce((s, p) => s + (p.count || 0), 0);
+            document.getElementById('statVpnUfwBlocks').textContent = formatNumber(totalBlocks);
+
+            if (!byPort.length) {
+                box.innerHTML = '<div class="empty">Sin bloqueos en el periodo</div>';
+                return;
+            }
+            box.innerHTML = byPort.slice(0, 10).map(item => `
+                <div class="ip-row">
+                    <div class="ip-info">
+                        <span class="badge badge-block">${item.port}</span>
+                        <div>
+                            <div class="ip-address">${item.service || 'puerto ' + item.port}</div>
+                        </div>
+                    </div>
+                    <span class="ip-count">${formatNumber(item.count)}</span>
+                </div>`).join('');
+        } catch (e) {
+            console.error('Error loading VPN UFW blocks:', e);
+            box.innerHTML = '<div class="empty">Error al cargar</div>';
+        }
+    }
+
     async function loadPageData() {
         await Promise.all([
             loadSshAuthStats(),
-            loadSshAuthEvents()
+            loadSshAuthEvents(),
+            loadVpnStats(),
+            loadVpnPeers(),
+            loadVpnUfwBlocks()
         ]);
     }
 

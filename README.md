@@ -25,6 +25,7 @@ Dashboard de monitoreo de seguridad y tráfico web para servidores con Nginx, Fa
 - **Gráfica de ataques por país**: Doughnut chart con top 12 países atacantes
 - **IPs baneadas permanentemente**: Tab con listado ordenable desde `/etc/fail2ban/ip.blacklist`
 - **Tabla de eventos SSH**: Ordenable, filtrable por tipo/usuario/IP y paginada
+- **Sección VPN (OpenVPN + WireGuard)**: Stats cards (conexiones OK, auth fallidas, peers WireGuard activos, bloqueos UFW a puertos VPN), top usuarios OpenVPN, top IPs OpenVPN fallidas (con geolocalización) y snapshot de peers WireGuard (interface, endpoint, last-handshake, transfer rx/tx)
 
 ### Página UFW Firewall
 - **Conexiones bloqueadas**: Total de eventos por acción (BLOCK/ALLOW)
@@ -56,8 +57,9 @@ nginx-monitor/
 │   ├── app.py              # Aplicación Flask principal
 │   └── templates/
 │       ├── base.html       # Template base con navegación
-│       ├── nginx.html      # Página Nginx + Fail2Ban
-│       ├── ssh_vpn.html    # Página SSH/VPN
+│       ├── nginx.html      # Página Nginx (tráfico web, CSP, logs)
+│       ├── baneos.html     # Página Baneos (Fail2Ban)
+│       ├── ssh_vpn.html    # Página SSH/VPN (incluye sección OpenVPN + WireGuard)
 │       ├── ufw.html        # Página UFW Firewall
 │       └── ip_list.html    # Página IP Whitelist/Blacklist
 ├── data/                   # Datos locales (backup SQLite)
@@ -142,12 +144,120 @@ MONITOR_SITE_APP=shop.example.com:woocommerce
 Si se usa detrás de un proxy Nginx con path `/nginx-monitor/`:
 
 ```nginx
+# Requiere tener definidas las zonas limit_req (ejemplo):
+# limit_req_zone $binary_remote_addr zone=general:10m rate=30r/s;
+# limit_req_zone $binary_remote_addr zone=api:10m     rate=30r/s;
+
 location /nginx-monitor/ {
-    proxy_pass http://localhost:5000/;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
+    limit_req zone=general burst=20 nodelay;
+    proxy_pass http://127.0.0.1:5000/;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+location /nginx-monitor/api/ {
+    limit_req zone=api burst=20 nodelay;
+    proxy_pass http://127.0.0.1:5000/api/;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
 }
 ```
+
+Recomendado adicionalmente: restringir el path `/nginx-monitor/` al rango de la
+VPN de administración con `allow <vpn-cidr>; deny all;` (el endpoint `/csp-report`
+debe seguir siendo público para recibir reportes del navegador).
+
+### Protección brute-force con Fail2Ban (opcional pero recomendado)
+
+Además de la autenticación HTTP Basic del propio app, conviene desplegar un
+jail de fail2ban que banee IPs con ráfagas de `401` contra `/nginx-monitor/`.
+
+**Filtro** — `/etc/fail2ban/filter.d/nginx-monitor-auth.conf`:
+
+```ini
+[INCLUDES]
+before = common.conf
+
+[Definition]
+failregex = ^<HOST> -.*"(GET|POST|HEAD) /nginx-monitor/[^"]*" 401 
+ignoreregex =
+datepattern = {^LN-BEG}
+```
+
+**Jail** — añadir a `/etc/fail2ban/jail.local`:
+
+```ini
+[nginx-monitor-auth]
+enabled  = true
+filter   = nginx-monitor-auth
+action   = iptables-multiport[name=nginx-monitor-auth, port="http,https"]
+logpath  = /var/log/nginx/access.log
+backend  = auto
+findtime = 300
+maxretry = 5
+bantime  = 86400
+```
+
+### VPN setup (host-side)
+
+Para que el dashboard muestre actividad de OpenVPN y WireGuard, el contenedor
+necesita acceso a datos que viven en el host con permisos restringidos
+(`openvpn-status.log` es `root:root 600`, `wg show` requiere `CAP_NET_ADMIN`).
+El patrón usado es un **cron en el host que vuelca periódicamente** los datos a
+una ruta legible por el contenedor.
+
+**1.** Asegúrate de que OpenVPN tiene `verb 3` en `/etc/openvpn/server.conf`
+para que el journal contenga eventos por cliente (`Peer Connection Initiated`,
+`TLS Auth Error`, etc.). Reinicia el servicio si lo cambias.
+
+**2.** Crea el directorio de volcado y el script de dump (como root):
+
+```bash
+sudo bash <<'EOF'
+mkdir -p /var/log/nginx-monitor
+chmod 755 /var/log/nginx-monitor
+
+cat > /usr/local/bin/nginx-monitor-vpn-dump.sh <<'SH'
+#!/bin/bash
+set -u
+TARGET=/var/log/nginx-monitor
+umask 022
+
+journalctl -u openvpn@server.service \
+    --since '12 minutes ago' --no-pager --output=short-iso \
+    > "$TARGET/openvpn-journal.log" 2>/dev/null || true
+
+[ -r /etc/openvpn/openvpn-status.log ] && \
+    cp /etc/openvpn/openvpn-status.log "$TARGET/openvpn-status.log"
+
+command -v wg >/dev/null 2>&1 && \
+    wg show all dump > "$TARGET/wg-dump.txt" 2>/dev/null || true
+
+chmod 644 "$TARGET"/*.log "$TARGET"/*.txt 2>/dev/null || true
+SH
+chmod 755 /usr/local/bin/nginx-monitor-vpn-dump.sh
+
+cat > /etc/cron.d/nginx-monitor-vpn <<'CRON'
+*/5 * * * * root /usr/local/bin/nginx-monitor-vpn-dump.sh
+CRON
+chmod 644 /etc/cron.d/nginx-monitor-vpn
+
+/usr/local/bin/nginx-monitor-vpn-dump.sh  # primer dump inmediato
+EOF
+```
+
+**3.** El `docker-compose.yml` ya monta `/var/log/nginx-monitor` como
+`read-only` dentro del contenedor. Si no tienes el cron, los endpoints
+`/api/vpn-stats` y `/api/vpn-peers` simplemente devuelven listas vacías.
+
+**Adaptar a tu setup**: si tu unit de OpenVPN no se llama `openvpn@server.service`
+(p. ej. usas el paquete `openvpn-server.service` o systemd-networkd para WG),
+edita el journalctl `--unit` correspondientemente. WireGuard funciona sin
+cambios siempre que `wg show` esté instalado y se ejecute como root.
 
 ### Endpoint CSP
 
@@ -184,8 +294,11 @@ El endpoint `/csp-report` no requiere autenticación para permitir reportes del 
 | `/api/fail2ban-events` | GET | Eventos Fail2Ban |
 | `/api/ssh-auth-stats` | GET | Estadísticas autenticación SSH |
 | `/api/ssh-auth-events` | GET | Eventos de autenticación SSH |
+| `/api/vpn-stats` | GET | Estadísticas VPN (OpenVPN: totales, top usuarios OK/fallidos, top IPs fallidas, eventos recientes) |
+| `/api/vpn-peers` | GET | Snapshot de peers VPN (clientes OpenVPN conectados + peers WireGuard) |
 | `/api/permanent-blacklist` | GET | IPs baneadas permanentemente (fail2ban) |
 | `/api/ufw-stats` | GET | Estadísticas UFW |
+| `/api/ufw-vpn-stats` | GET | Bloqueos UFW a puertos VPN |
 | `/api/ufw-events` | GET | Eventos UFW |
 | `/api/geoip` | POST | Geolocalización de IPs |
 | `/api/sync` | POST | Forzar sincronización de logs |
@@ -303,6 +416,35 @@ curl -u admin:password -X POST "https://tu-dominio/nginx-monitor/api/cleanup?mon
 - Validación de parámetros de entrada (límites en hours, limit, months)
 - Dependencias actualizadas sin vulnerabilidades conocidas
 - Límites de recursos Docker para evitar DoS
+- `no-new-privileges:true` en ambos contenedores (bloquea escalada vía binarios setuid)
+- Postgres ejecutándose como UID 70 explícito (no root)
+
+### Recomendaciones de despliegue
+
+- **Permisos del `.env`**: `chmod 600 .env` y `chown root:root` (contiene
+  `SECRET_KEY`, `AUTH_PASS` y `POSTGRES_PASSWORD` en claro). Docker Compose
+  lo lee con el usuario que ejecuta `docker compose up`, no necesita ACL extra.
+- **Rotación de secretos**: al cambiar `POSTGRES_PASSWORD` recuerda rotar
+  también la contraseña dentro de la base ya inicializada:
+  `docker exec nginx-monitor-postgres psql -U monitor -d monitor -c "ALTER USER monitor WITH PASSWORD '<nuevo>'"`.
+  Cambiar solo `.env` no altera el password efectivo en el volumen persistente.
+- **Rate-limit en el proxy nginx** (ver sección "Configuración con Nginx Proxy")
+  y jail `nginx-monitor-auth` de fail2ban para brute-force sobre BasicAuth.
+- **Restringir el path a la VPN de administración** si no es necesario que el
+  dashboard sea accesible públicamente.
+- **Backup automático**: el proyecto está integrado en el backup maestro
+  `/opt/docker-projects/backups/backup_all.sh` (cron diario 03:00 UTC del usuario
+  `troig`). Los dumps comprimidos con `zstd --ultra -22` se guardan en
+  `/opt/docker-projects/backups/nginx-monitor/` con retención 10 días. La base
+  de ~2 GB comprime a ~45 MB por dump.
+  Restaurar un dump:
+  ```bash
+  cd /opt/docker-projects/nginx-monitor
+  docker compose exec -T postgres psql -U monitor -d postgres \
+      -c 'DROP DATABASE IF EXISTS monitor; CREATE DATABASE monitor;'
+  zstd -dc /opt/docker-projects/backups/nginx-monitor/postgres_YYYYMMDD_HHMMSS.sql.zst \
+      | docker compose exec -T postgres psql -U monitor -d monitor
+  ```
 
 ## Desarrollo
 
@@ -388,6 +530,18 @@ python app.py
 - ✅ Home (`nginx.html`) simplificada: sin la sección Fail2Ban ni su JS
 - ✅ Reutiliza los endpoints existentes `/api/fail2ban-stats` y `/api/fail2ban-events` (backend intacto)
 - ✅ Acceso a `/nginx-monitor` restringido por Nginx a IP de oficina + redes VPN (`allow/deny`)
+
+### Dashboard VPN OpenVPN + WireGuard (línea paralela v2.8.0 → v2.8.1)
+- ✅ Sección "VPN - OpenVPN + WireGuard" en el tab SSH/VPN: 4 stats cards (conexiones OK, auth fallidas, peers WireGuard activos, bloqueos UFW a puertos VPN)
+- ✅ Cards "Top Usuarios OpenVPN", "Top IPs OpenVPN Fallidas" (con geolocalización) y "Peers WireGuard" (interface, endpoint, last-handshake relativo, transfer rx/tx)
+- ✅ Modelo `VpnEvent` (`vpn_events`) con unique constraint para deduplicación entre ejecuciones del sync
+- ✅ Parsers `parse_openvpn_journal()`, `parse_openvpn_status()` y `parse_wg_dump()`
+- ✅ Endpoints `GET /api/vpn-stats` y `GET /api/vpn-peers`; `sync_vpn_internal()` integrado en el ciclo `sync_logs()` (cada 5 min)
+- ✅ `.env.example`: `/panel/` añadido al valor recomendado de `MONITOR_ADMIN_PATHS` (default de `docker-compose.yml` sin cambios)
+
+### Reintegración de líneas divergentes (v2.10.0)
+- ✅ Unificación de las dos líneas paralelas (v2.9.0 "Página Baneos" + v2.8.1 "Dashboard VPN") en una sola versión sin pérdida de funcionalidad
+- ✅ Coexisten la página `/baneos` y la sección VPN del tab SSH/VPN, junto con la config Nginx con rate-limit, el jail `nginx-monitor-auth`, el setup VPN host-side, las recomendaciones de despliegue y el backup automático
 
 ## Uso de IP Lists
 

@@ -2,6 +2,54 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [2.10.0] - 2026-06-19
+
+Reintegración de las dos líneas divergentes que partían de v2.7.0 en una
+única versión. Hasta ahora el proyecto se había bifurcado: una línea local
+llegó hasta v2.9.0 y otra línea (la publicada en `origin/main`) llegó hasta
+v2.8.1. Esta versión las une **sin perder ninguna mejora de ningún lado**.
+
+> **Nota sobre las dos v2.8.0**: cada línea publicó su propia versión 2.8.0
+> con contenido distinto (la local del 2026-05-23, la remota del 2026-05-14).
+> No son la misma release. Para no perder ninguna y evitar un encabezado
+> duplicado, en este changelog aparecen ambas desambiguadas como
+> **2.8.0 (línea local)** y **2.8.0 (línea remota)**; v2.10.0 las unifica en
+> una sola base de código.
+
+### Reintegrado — línea local (hasta v2.9.0)
+- **Página `/baneos` (Dashboard Fail2Ban)** dedicada, separada de la home.
+- **Acceso a `/nginx-monitor` restringido por IP** (oficina + redes VPN +
+  `deny all`) como segunda capa sobre el Basic Auth.
+- **Fix de truncamiento `VARCHAR(500)`** en `nginx_logs` (`request_uri` y
+  `message`) que tiraba el batch INSERT entero.
+- **`sync_visits_internal` con upsert nativo** (`INSERT ... ON CONFLICT`).
+- **`scripts/block-asia.sh`** (bloqueo por país a nivel kernel con
+  `ipset`/`iptables`) y fix de `scripts/manage-blacklist.sh`.
+- **UI más compacta** (paddings/fuentes en `base.html`, emojis en labels).
+
+### Reintegrado — línea remota (hasta v2.8.1)
+- **Consolidación de hardening + documentación de seguridad** (runtime de
+  contenedores: `no-new-privileges`, postgres como `70:70`, `PGDATA`
+  explícito; README con permisos `.env`, rate-limit, jail fail2ban, rotación
+  de `POSTGRES_PASSWORD`, backups, ACL por VPN).
+- **Card "Top 10 Páginas Visitadas (200)"** y **"Visitas por País (200)"**
+  (con desglose de regiones de España).
+- **`MONITOR_ADMIN_PATHS`** para excluir paths de administración (WordPress,
+  Django) de las analíticas de tráfico; ejemplo con `/panel/` en
+  `.env.example`.
+- **Sección "VPN - OpenVPN + WireGuard"** en el tab SSH/VPN (modelo
+  `VpnEvent`, parsers, endpoints `/api/vpn-stats` y `/api/vpn-peers`,
+  `sync_vpn_internal()`).
+- **Filtro de assets unificado** (`is_static_asset` + `ASSET_EXTENSIONS`) y
+  fix de race condition en `create_tables()`.
+
+### Corregido (nuevo en la reintegración)
+- **Navegación con `basePath`** - los enlaces del menú ahora funcionan tanto
+  servidos en la raíz / subdominio como bajo el prefijo `/nginx-monitor`. Las
+  dos líneas habían divergido en cómo construían las URLs del navbar; el merge
+  unifica la resolución del prefijo base para que ningún enlace quede roto en
+  ninguno de los dos escenarios de despliegue.
+
 ## [2.9.0] - 2026-06-08
 
 ### Añadido
@@ -16,7 +64,9 @@ Todos los cambios notables en este proyecto serán documentados en este archivo.
 ### Seguridad
 - **Acceso a `/nginx-monitor` restringido por IP** - el `location` del vhost `sucemart.com` ahora aplica `allow` a la IP fija de oficina y a las redes VPN (`10.6.0.0/24`, `10.8.0.0/24`) + `deny all`, como segunda capa sobre el Basic Auth. Las IPs no autorizadas reciben `403` (configuración Nginx, fuera del repo)
 
-## [2.8.0] - 2026-05-23
+## [2.8.0 (línea local)] - 2026-05-23
+
+> Una de las dos v2.8.0 divergentes. Unificada en v2.10.0.
 
 ### Corregido
 - **Truncamiento VARCHAR(500) en `nginx_logs`** - `request_uri` y `message` se truncan a 500 caracteres antes de insertar
@@ -39,6 +89,166 @@ Todos los cambios notables en este proyecto serán documentados en este archivo.
 - **UI más densa** - Reducidos paddings, márgenes y tamaños de fuente en `base.html` (container, h1/h2/h3, nav)
 - **Emojis en labels de cards** - Visitas, IPs Únicas, CSP, Rate Limit, Bad Bots, Errores HTTP, SSH (Logins, Fallidos, Scanners), Fail2Ban
 - **Layout `nginx.html`/`ssh_vpn.html`/`ufw.html`** - Eliminadas clases `compact`/`chart-card-fill` redundantes ahora que el layout base ya es más compacto
+
+## [2.8.1] - 2026-05-14
+
+### Documentación
+- `.env.example`: incluir `/panel/` en el valor recomendado de
+  `MONITOR_ADMIN_PATHS`. Es un patrón muy común en proyectos Django para
+  paneles privados de cliente y conviene tenerlo en el ejemplo. El default
+  del `docker-compose.yml` se mantiene en `/wp-admin/,/wp-login.php,/admin/`
+  (sin `/panel/`) porque no es un convenio universal.
+
+## [2.8.0 (línea remota)] - 2026-05-14
+
+> Una de las dos v2.8.0 divergentes. Unificada en v2.10.0.
+
+### Añadido
+- **Sección "VPN - OpenVPN + WireGuard"** en el tab SSH/VPN del dashboard:
+  - 4 stats cards: VPN Conexiones OK, VPN Auth Fallidas, Peers WireGuard Activos,
+    Bloqueos UFW Puertos VPN.
+  - Card "Top Usuarios OpenVPN" (logins exitosos por usuario).
+  - Card "Top IPs OpenVPN Fallidas" con geolocalización (banderas).
+  - Card "Peers WireGuard" mostrando peers OpenVPN conectados ahora + peers
+    WG con interface, endpoint, `last-handshake` relativo, transfer rx/tx.
+    Un peer WG se considera "activo" si tuvo handshake en los últimos 3 min.
+  - Card "Bloqueos UFW a Puertos VPN" reutilizando `/api/ufw-vpn-stats`.
+- **Modelo `VpnEvent`** (`vpn_events`) para eventos históricos parseados del
+  journal de OpenVPN: timestamp, service, event_type
+  (`auth_ok`/`auth_fail`/`connect`/`disconnect`/`tls_error`/`verify_error`/`reset`),
+  common_name, username, src_ip, src_port, message, raw_line. Unique
+  constraint para deduplicación entre ejecuciones del sync.
+- **Parsers**: `parse_openvpn_journal()` (journalctl short-iso format),
+  `parse_openvpn_status()` (formato CSV de openvpn-status.log) y
+  `parse_wg_dump()` (output de `wg show all dump`).
+- **Endpoints**:
+  - `GET /api/vpn-stats?hours=N`: totales, top usuarios OK/fallidos,
+    top IPs fallidas, eventos recientes.
+  - `GET /api/vpn-peers`: snapshot on-the-fly (no persistente) de clientes
+    OpenVPN y peers WireGuard.
+- **`sync_vpn_internal()`** integrado en el ciclo periódico `sync_logs()`
+  (cada 5 min, junto con visits/fail2ban/ufw/ssh).
+- **Volumen `/var/log/nginx-monitor`** read-only en `docker-compose.yml`.
+
+### Corregido
+- **Race condition en `create_tables()`**: con varios workers de gunicorn
+  arrancando a la vez, `db.create_all()` colisionaba contra
+  `pg_type_typname_nsp_index` al añadir tablas nuevas, crasheando el worker
+  en cold boot. Ahora se captura el error y se hace rollback (las tablas
+  existentes ya están bien; un schema mismatch real fallaría más tarde en
+  queries reales).
+
+### Documentación
+- **Nueva sección "VPN setup (host-side)"** en README con el bloque de comandos
+  para crear el cron host que vuelca journal OpenVPN + `openvpn-status.log` +
+  `wg show all dump` a `/var/log/nginx-monitor/` (legible por el contenedor).
+  Sin este cron, los endpoints VPN devuelven listas vacías.
+
+### Notas operativas
+- WireGuard **no registra fallos de autenticación** por diseño del protocolo
+  (paquetes sin clave válida se descartan en silencio). La card "VPN Auth
+  Fallidas" solo refleja eventos de OpenVPN.
+- OpenVPN necesita `verb 3` o superior para que los eventos por cliente
+  aparezcan en el journal.
+
+## [2.7.3] - 2026-05-14
+
+### Añadido
+- **`MONITOR_ADMIN_PATHS`** (nueva variable de entorno, default
+  `/wp-admin/,/wp-login.php,/admin/`): lista de substrings que identifican
+  paths de administración. Las URIs que CONTENGAN alguno de ellos se
+  excluyen de las analíticas "Top URIs" y "Visitas por País", para que la
+  navegación administrativa (WordPress, Django) no se mezcle con el
+  tráfico real de usuarios.
+  - Comparación por substring (no por prefijo) para cubrir aplicaciones
+    Django montadas en subpaths, p.ej. `/alquiler/admin/...`.
+  - Si se deja vacía no aplica filtro.
+
+## [2.7.2] - 2026-05-14
+
+### Añadido
+- **Card "Top 10 Páginas Visitadas (200)"** en el dashboard Nginx:
+  - Nuevo endpoint `/api/top-uris` que consulta `NginxLog` filtrando
+    `log_type='access'` y `status_code=200`.
+  - URIs agrupadas ignorando query string: `/producto?id=1` y `/producto?id=2`
+    cuentan como `/producto` (vía `split_part(request_uri, '?', 1)` en SQL).
+  - Respeta filtros de site/app y rango temporal del dashboard.
+  - UI siguiendo el patrón `top-ips-card.compact` (lista plana con URI
+    truncada a 60 chars + contador, tooltip con la URI completa).
+- **Card "Visitas por País (200)"** con desglose de regiones de España:
+  - Nuevo endpoint `/api/visits-by-country` que devuelve top N IPs únicas
+    (default 200, max 1000) con su número de visitas 200. El frontend
+    agrega por país tras hacer batch geo lookup contra `/api/geoip`.
+  - Doughnut de Chart.js con top 8 países y agrupación "Otros" para el resto.
+  - Cuando hay tráfico desde España, debajo del doughnut aparece una franja
+    con chips de las CCAA/regiones top 8 (estilo `.region-chip`).
+- **`MONITOR_SELF_PATH`** (nueva variable de entorno, default `/nginx-monitor/`):
+  - Excluye URIs que empiezan por este prefijo de las dos nuevas analíticas
+    para que el polling del propio dashboard no contamine los datos de
+    visitas reales a las apps monitorizadas.
+  - Si se deja vacía no aplica filtro.
+
+### Mejorado
+- **`/api/geoip`** amplía los campos que pide a `ip-api.com` (`regionName`,
+  `region`) sin coste extra (campos gratis del batch endpoint).
+- **`getGeoInfoBatch`** (base.html) ahora procesa todos los chunks de IPs
+  encadenando llamadas de 100 en 100 (antes silenciaba IPs >100 del primer
+  batch, pequeño bug latente que afloraba con muchos visitantes únicos).
+  Guarda también `regionName` y `region` en el cache local.
+
+## [2.7.1] - 2026-05-14
+
+Versión que consolida sobre v2.7.0 (multi-vhost) las mejoras que la rama
+paralela había acumulado como v2.6.1–v2.6.3: hardening de despliegue,
+documentación de seguridad y corrección del filtro de assets.
+
+### Corregido
+- **Filtro de assets unificado** (función `is_static_asset` + constante
+  `ASSET_EXTENSIONS`) reemplaza las dos listas previas que vivían cada una
+  en su propio scope (`STATIC_EXTENSIONS` set para `parse_nginx_access_log`
+  y lista inline en `parse_visits_from_access_log`).
+  - **Strip de query string y fragmento** antes de comparar extensión. Antes
+    `/style.css?ver=6.4` se contaba como visita porque `endswith('.css')`
+    devolvía `False`. Con el cache-busting típico de WordPress esto inflaba
+    los conteos del gráfico "Visitas por Aplicación".
+  - **Comparación case-insensitive** (`.PNG` se filtra igual que `.png`).
+  - **Extensiones añadidas**: `.avif` (imagen moderna), `.eot` y `.otf`
+    (fuentes), `.mp4`, `.webm`, `.mp3`, `.ogg` (media). Mantiene `.map` y
+    `.webmanifest` que ya añadió v2.7.0.
+  - **Nota**: los datos históricos de `visit_stats` no se recalculan
+    automáticamente (la tabla agrega por hora/site/app sin guardar URIs).
+    El efecto solo se nota en los logs procesados a partir del despliegue.
+
+### Seguridad (runtime de contenedores)
+- **`no-new-privileges: true`** en los dos servicios (`nginx-monitor` y
+  `postgres`) de `docker-compose.yml`. Bloquea cualquier escalada vía binarios
+  setuid/setgid dentro del contenedor.
+- **Postgres ejecutándose como `user: 70:70`** de forma explícita en compose.
+  Es el UID por defecto de `postgres:18-alpine`, pero declararlo evita que un
+  cambio de imagen base lo deje corriendo como root.
+- **`PGDATA=/var/lib/postgresql/data`** explícito como variable de entorno
+  para que la ruta del data dir no dependa del default de la imagen.
+
+### Documentación
+- **Recomendaciones de hardening** añadidas al README:
+  - Permisos del `.env` a `600` (contiene `SECRET_KEY`, `AUTH_PASS`,
+    `POSTGRES_PASSWORD` en claro).
+  - Rate-limit nginx en los paths `/nginx-monitor/` (`zone=general`) y
+    `/nginx-monitor/api/` (`zone=api`), con `burst=20 nodelay`.
+  - Filtro y jail fail2ban `nginx-monitor-auth` para banear IPs con ráfagas
+    de `401` contra el dashboard (5 fallos/5 min → 24h de ban).
+  - Procedimiento de rotación de `POSTGRES_PASSWORD` (requiere `ALTER USER`
+    dentro de la DB, cambiar solo `.env` no basta).
+  - ACL por VPN sugerida para restringir el dashboard a la red de administración.
+- **Procedimiento de backup automático** documentado en README:
+  - Integración con `/opt/docker-projects/backups/backup_all.sh`
+    (cron diario 03:00 UTC, usuario `troig`).
+  - Compresión con `zstd --ultra -22`, retención 10 días, ~45 MB por dump.
+  - Comando de restauración a partir de un `.sql.zst`.
+
+### Otros
+- `.gitignore`: excluir backups `.env.bak*` y `.env.*.bak*` (pueden contener
+  credenciales rotadas en claro).
 
 ## [2.7.0] - 2026-03-18
 
