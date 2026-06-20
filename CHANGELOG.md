@@ -2,6 +2,32 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [2.11.1] - 2026-06-20
+
+### Corregido / mejorado (follow-up de la auditoría)
+- **Dedup periódico** en el job de limpieza diario: red de seguridad ante solapes
+  de rotación. La duplicación por concurrencia ya no ocurre (`--workers 1` +
+  advisory lock, v2.11.0) y los duplicados históricos ya se limpiaron.
+- **Lectura de logs más resistente a picos:** se sube `last_lines` (nginx 20000;
+  auth/fail2ban/ufw 15000) para cubrir ventanas de tráfico mucho mayores entre
+  syncs. Se evaluó un **offset-tracking incremental** pero se **descartó**: una
+  revisión adversarial detectó que su interacción con el filtro de `cutoff` podía
+  causar **pérdida silenciosa** de líneas (peor que la duplicación ocasional que
+  evitaba). Se optó por la solución simple y segura.
+- **Limpiezas:** eliminado código muerto `INTERNAL_IPS`/`INTERNAL_IP_PREFIXES`
+  (sustituido por `ipaddress.is_private`); acotado el caché de geoip (cap 50k);
+  eliminada variable sin uso en `cleanup_old_data`.
+- **Frontend:** null-checks en `ufw.html` (`loadUfwStats`) y `loadVpnPeers`
+  (peers WireGuard/OpenVPN con campos potencialmente nulos).
+
+### Pendiente (follow-up)
+- Offset-tracking incremental *lossless* de logs (requiere desacoplar el avance de
+  offset del filtro de cutoff y consistencia transaccional; descartado esta ronda
+  por riesgo de pérdida silenciosa).
+- Migración de zona horaria de los datos históricos a UTC (descartada: los datos
+  nuevos ya son UTC y los viejos caducan con la retención de 3 meses; un UPDATE
+  global arriesga doble-shift).
+
 ## [2.11.0] - 2026-06-20
 
 ### Corregido (auditoría de código)

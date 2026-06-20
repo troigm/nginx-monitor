@@ -635,9 +635,9 @@
                 const transfer = `${formatBytes(p.bytes_recv)} ↓ / ${formatBytes(p.bytes_sent)} ↑`;
                 rows.push(`<div class="ip-row">
                     <div class="ip-info">
-                        <span class="badge ${badgeCls}">${esc(p.interface.toUpperCase())}</span>
+                        <span class="badge ${badgeCls}">${esc((p.interface || '').toUpperCase())}</span>
                         <div>
-                            <div class="ip-address" title="${esc(p.public_key)}">${esc(p.public_key.slice(0, 12))}…</div>
+                            <div class="ip-address" title="${esc(p.public_key)}">${esc((p.public_key || '').slice(0, 12))}…</div>
                             <div class="ip-country">${esc(p.endpoint || 'sin endpoint')} &middot; ${transfer} &middot; ${handshakeTxt}</div>
                         </div>
                     </div>

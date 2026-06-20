@@ -259,11 +259,11 @@
             const res = await apiFetch(`${basePath}/api/ufw-stats?${params}`);
             const data = await res.json();
 
-            document.getElementById('statUfwBlocks').textContent = formatNumber(data.totals.blocks);
-            document.getElementById('statUfwTotal').textContent = formatNumber(data.totals.total);
+            document.getElementById('statUfwBlocks').textContent = formatNumber(data.totals?.blocks ?? 0);
+            document.getElementById('statUfwTotal').textContent = formatNumber(data.totals?.total ?? 0);
 
-            const tcpBlocked = data.by_proto.find(p => p.proto === 'TCP')?.count || 0;
-            const udpBlocked = data.by_proto.find(p => p.proto === 'UDP')?.count || 0;
+            const tcpBlocked = (data.by_proto || []).find(p => p.proto === 'TCP')?.count || 0;
+            const udpBlocked = (data.by_proto || []).find(p => p.proto === 'UDP')?.count || 0;
             document.getElementById('statUfwTcp').textContent = formatNumber(tcpBlocked);
             document.getElementById('statUfwUdp').textContent = formatNumber(udpBlocked);
 

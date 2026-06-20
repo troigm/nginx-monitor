@@ -308,10 +308,6 @@ BOT_PATTERNS = [
     'wordpress/', 'python-requests', 'curl/', 'wget/', 'httpx'
 ]
 
-# IPs internas a excluir
-INTERNAL_IPS = ['127.0.0.1', '::1']
-INTERNAL_IP_PREFIXES = ['172.', '10.', '192.168.']
-
 # Extensiones de recursos estaticos (no cuentan como visitas reales).
 # Se compara tras quitar query string/fragmento y en minusculas, para que
 # /style.css?v=123 tambien se filtre (cache-busting tipo WordPress).
@@ -365,7 +361,7 @@ def detect_site(server_name):
 
 # ==================== PARSEO DE LOGS ====================
 
-def parse_nginx_error_log(log_path='/var/log/nginx/error.log', last_lines=1000, site_override=None):
+def parse_nginx_error_log(log_path='/var/log/nginx/error.log', last_lines=20000, site_override=None):
     """Parsea el log de errores de nginx"""
     if not os.path.exists(log_path):
         return []
@@ -414,7 +410,7 @@ def parse_nginx_error_log(log_path='/var/log/nginx/error.log', last_lines=1000, 
 
     return entries
 
-def parse_nginx_access_log(log_path='/var/log/nginx/access.log', last_lines=5000, site_override=None):
+def parse_nginx_access_log(log_path='/var/log/nginx/access.log', last_lines=20000, site_override=None):
     """Parsea el log de acceso de nginx: peticiones reales (no bots, no estáticos)"""
     if not os.path.exists(log_path):
         return []
@@ -486,7 +482,7 @@ def parse_nginx_access_log(log_path='/var/log/nginx/access.log', last_lines=5000
 
     return entries
 
-def parse_visits_from_access_log(log_path='/var/log/nginx/access.log', last_lines=5000, site_override=None):
+def parse_visits_from_access_log(log_path='/var/log/nginx/access.log', last_lines=20000, site_override=None):
     """Parsea el access log para contar visitas reales (excluyendo bots)"""
     if not os.path.exists(log_path):
         return {}
@@ -625,7 +621,7 @@ def sync_visits_internal():
         db.session.rollback()
         app.logger.error(f"Error syncing visits: {e}")
 
-def parse_fail2ban_log(log_path='/var/log/fail2ban.log', last_lines=2000):
+def parse_fail2ban_log(log_path='/var/log/fail2ban.log', last_lines=15000):
     """Parsea el log de fail2ban para extraer eventos Found, Ban, Unban"""
     if not os.path.exists(log_path):
         return []
@@ -704,7 +700,7 @@ def sync_fail2ban_internal():
         db.session.rollback()
         app.logger.error(f"Error syncing fail2ban: {e}")
 
-def parse_ufw_log(log_path='/var/log/ufw.log', last_lines=3000):
+def parse_ufw_log(log_path='/var/log/ufw.log', last_lines=15000):
     """Parsea el log de UFW/iptables para extraer eventos BLOCK, ALLOW, etc."""
     if not os.path.exists(log_path):
         return []
@@ -783,7 +779,7 @@ def sync_ufw_internal():
         db.session.rollback()
         app.logger.error(f"Error syncing UFW: {e}")
 
-def parse_auth_log(log_path='/var/log/auth.log', last_lines=3000):
+def parse_auth_log(log_path='/var/log/auth.log', last_lines=15000):
     """Parsea el log de autenticación SSH para extraer eventos de login"""
     if not os.path.exists(log_path):
         return []
@@ -1726,6 +1722,8 @@ def api_geoip():
             for rec in fresh:
                 ip = rec.get('query')
                 if ip:
+                    if len(_geo_cache) > 50000:
+                        _geo_cache.clear()
                     _geo_cache[ip] = (now + _GEO_CACHE_TTL, rec)
                     cached[ip] = rec
         except urllib.error.HTTPError as e:
@@ -2625,7 +2623,6 @@ def health():
 def cleanup_old_data(months=3):
     """Elimina datos más antiguos que X meses para mantener la DB pequeña"""
     cutoff = datetime.utcnow() - timedelta(days=months * 30)
-    now = datetime.utcnow()
     results = {}
 
     # Advisory lock: evita que dos cleanups corran a la vez (scheduler + manual
@@ -2665,6 +2662,22 @@ def cleanup_old_data(months=3):
         # Limpiar visit_stats
         count = VisitStats.query.filter(VisitStats.timestamp < cutoff).delete()
         results['visit_stats'] = count
+
+        # Dedup periodico: borra filas byte-identicas dejando MIN(id). Red de
+        # seguridad ante solapes de rotacion (la duplicacion por concurrencia ya
+        # no ocurre con --workers 1 + advisory lock).
+        dedup_specs = {
+            'nginx_logs': 'timestamp,site,app,log_type,client_ip,message,request_uri,status_code,user_agent,raw_line',
+            'ufw_events': 'timestamp,action,src_ip,dst_ip,proto,src_port,dst_port,interface,raw_line',
+            'fail2ban_events': 'timestamp,jail,event_type,ip,raw_line',
+            'ssh_auth_events': 'timestamp,event_type,auth_method,username,src_ip,src_port,raw_line',
+        }
+        for _tbl, _cols in dedup_specs.items():
+            _res = db.session.execute(text(
+                f"DELETE FROM {_tbl} WHERE id IN (SELECT id FROM (SELECT id, "
+                f"row_number() OVER (PARTITION BY {_cols} ORDER BY id) rn FROM {_tbl}) s WHERE rn > 1)"
+            ))
+            results[f'{_tbl}_dedup'] = _res.rowcount
 
         db.session.commit()
 
