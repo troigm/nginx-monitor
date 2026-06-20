@@ -178,10 +178,10 @@
     <table>
         <thead>
             <tr>
-                <th class="sortable" onclick="sortBlacklist('ip', 'string')">IP</th>
-                <th class="sortable" onclick="sortBlacklist('country', 'string')">Pais</th>
-                <th class="sortable desc" onclick="sortBlacklist('attempts', 'number')">Intentos SSH</th>
-                <th class="sortable" onclick="sortBlacklist('last_seen', 'date')">Ultimo Ataque</th>
+                <th class="sortable" onclick="sortBlacklist('ip', 'string', this)">IP</th>
+                <th class="sortable" onclick="sortBlacklist('country', 'string', this)">Pais</th>
+                <th class="sortable desc" onclick="sortBlacklist('attempts', 'number', this)">Intentos SSH</th>
+                <th class="sortable" onclick="sortBlacklist('last_seen', 'date', this)">Ultimo Ataque</th>
             </tr>
         </thead>
         <tbody id="blacklistTableBody">
@@ -215,7 +215,7 @@
             'banner_error': { cls: 'badge-audit', label: 'BOT' }
         };
         const b = badges[eventType] || { cls: 'badge-audit', label: eventType };
-        return `<span class="badge ${b.cls}">${b.label}</span>`;
+        return `<span class="badge ${b.cls}">${esc(b.label)}</span>`;
     }
 
     function sortData(data, field, direction, type) {
@@ -295,10 +295,10 @@
                 <tr>
                     <td class="mono">${formatDate(r.timestamp)}</td>
                     <td>${getSshEventBadge(r.event_type)}</td>
-                    <td>${r.username || '<span style="color:#666">-</span>'}</td>
-                    <td class="mono">${r.src_ip || '-'}</td>
-                    <td>${r.auth_method || '<span style="color:#666">-</span>'}</td>
-                    <td>${geo.flag} ${geo.country}</td>
+                    <td>${r.username ? esc(r.username) : '<span style="color:#666">-</span>'}</td>
+                    <td class="mono">${esc(r.src_ip || '-')}</td>
+                    <td>${r.auth_method ? esc(r.auth_method) : '<span style="color:#666">-</span>'}</td>
+                    <td>${esc(geo.flag)} ${esc(geo.country)}</td>
                 </tr>
             `;
         }).join('');
@@ -326,7 +326,7 @@
                 document.getElementById('topSshIpsAccepted').innerHTML = data.top_ips_accepted.map(item => {
                     const geo = geoCache[item.ip] || { flag: '', country: '' };
                     const timeStr = item.last_seen ? `<span class="ip-time">${formatTime(item.last_seen)}</span>` : '';
-                    return `<div class="ip-row"><div class="ip-info"><span class="ip-flag">${geo.flag}</span><div><div class="ip-address">${item.ip}</div><div class="ip-country">${geo.country}${timeStr}</div></div></div><span class="ip-count" style="background: linear-gradient(135deg, #27ae60, #1e8449);">${item.count}</span></div>`;
+                    return `<div class="ip-row"><div class="ip-info"><span class="ip-flag">${esc(geo.flag)}</span><div><div class="ip-address">${esc(item.ip)}</div><div class="ip-country">${esc(geo.country)}${timeStr}</div></div></div><span class="ip-count" style="background: linear-gradient(135deg, #27ae60, #1e8449);">${esc(item.count)}</span></div>`;
                 }).join('');
             } else {
                 document.getElementById('topSshIpsAccepted').innerHTML = '<div class="empty">Sin logins exitosos</div>';
@@ -339,7 +339,7 @@
                 document.getElementById('topSshIpsFailed').innerHTML = data.top_ips_failed.map(item => {
                     const geo = geoCache[item.ip] || { flag: '', country: '' };
                     const timeStr = item.last_seen ? `<span class="ip-time">${formatTime(item.last_seen)}</span>` : '';
-                    return `<div class="ip-row"><div class="ip-info"><span class="ip-flag">${geo.flag}</span><div><div class="ip-address">${item.ip}</div><div class="ip-country">${geo.country}${timeStr}</div></div></div><span class="ip-count" style="background: linear-gradient(135deg, #e74c3c, #c0392b);">${item.count}</span></div>`;
+                    return `<div class="ip-row"><div class="ip-info"><span class="ip-flag">${esc(geo.flag)}</span><div><div class="ip-address">${esc(item.ip)}</div><div class="ip-country">${esc(geo.country)}${timeStr}</div></div></div><span class="ip-count" style="background: linear-gradient(135deg, #e74c3c, #c0392b);">${esc(item.count)}</span></div>`;
                 }).join('');
             } else {
                 document.getElementById('topSshIpsFailed').innerHTML = '<div class="empty">Sin intentos fallidos</div>';
@@ -348,7 +348,7 @@
             // Top users with successful login
             if (data.top_users_accepted && data.top_users_accepted.length > 0) {
                 document.getElementById('topSshUsersAccepted').innerHTML = data.top_users_accepted.map(item => `
-                    <div class="ip-row"><div class="ip-info"><span class="ip-flag">👤</span><div><div class="ip-address">${item.username}</div></div></div><span class="ip-count" style="background: linear-gradient(135deg, #27ae60, #1e8449);">${item.count}</span></div>
+                    <div class="ip-row"><div class="ip-info"><span class="ip-flag">👤</span><div><div class="ip-address">${esc(item.username)}</div></div></div><span class="ip-count" style="background: linear-gradient(135deg, #27ae60, #1e8449);">${esc(item.count)}</span></div>
                 `).join('');
             } else {
                 document.getElementById('topSshUsersAccepted').innerHTML = '<div class="empty">Sin usuarios</div>';
@@ -357,7 +357,7 @@
             // Top users attacked
             if (data.top_users_failed && data.top_users_failed.length > 0) {
                 document.getElementById('topSshUsersFailed').innerHTML = data.top_users_failed.map(item => `
-                    <div class="ip-row"><div class="ip-info"><span class="ip-flag">👤</span><div><div class="ip-address">${item.username}</div></div></div><span class="ip-count" style="background: linear-gradient(135deg, #e74c3c, #c0392b);">${item.count}</span></div>
+                    <div class="ip-row"><div class="ip-info"><span class="ip-flag">👤</span><div><div class="ip-address">${esc(item.username)}</div></div></div><span class="ip-count" style="background: linear-gradient(135deg, #e74c3c, #c0392b);">${esc(item.count)}</span></div>
                 `).join('');
             } else {
                 document.getElementById('topSshUsersFailed').innerHTML = '<div class="empty">Sin usuarios atacados</div>';
@@ -446,7 +446,7 @@
 
             // Populate user filter
             const users = [...new Set(tableData.map(r => r.username).filter(u => u))].sort();
-            document.getElementById('filterSshUser').innerHTML = '<option value="">Todos</option>' + users.map(u => `<option value="${u}">${u}</option>`).join('');
+            document.getElementById('filterSshUser').innerHTML = '<option value="">Todos</option>' + users.map(u => `<option value="${esc(u)}">${esc(u)}</option>`).join('');
 
             renderPagination(paginationState);
             applyTableFilters();
@@ -457,7 +457,7 @@
 
     let blacklistSort = { field: 'attempts', direction: 'desc' };
 
-    function sortBlacklist(field, type) {
+    function sortBlacklist(field, type, th) {
         if (blacklistSort.field === field) {
             blacklistSort.direction = blacklistSort.direction === 'asc' ? 'desc' : 'asc';
         } else {
@@ -465,7 +465,7 @@
             blacklistSort.direction = 'desc';
         }
         document.querySelectorAll('#tabBlacklist th.sortable').forEach(h => h.classList.remove('asc', 'desc'));
-        event.currentTarget.classList.add(blacklistSort.direction);
+        if (th) th.classList.add(blacklistSort.direction);
         applyBlacklistFilter();
     }
 
@@ -518,9 +518,9 @@
             const lastSeen = r.last_seen ? formatDate(r.last_seen) : '<span style="color:#666">-</span>';
             return `
                 <tr>
-                    <td class="mono">${r.ip}</td>
-                    <td>${r.flag} ${r.country}</td>
-                    <td style="text-align:center"><span class="ip-count" style="background: linear-gradient(135deg, #e74c3c, #c0392b);">${r.attempts}</span></td>
+                    <td class="mono">${esc(r.ip)}</td>
+                    <td>${esc(r.flag)} ${esc(r.country)}</td>
+                    <td style="text-align:center"><span class="ip-count" style="background: linear-gradient(135deg, #e74c3c, #c0392b);">${esc(r.attempts)}</span></td>
                     <td class="mono">${lastSeen}</td>
                 </tr>
             `;
@@ -559,36 +559,38 @@
         try {
             const res = await apiFetch(`${basePath}/api/vpn-stats?${params}`);
             const data = await res.json();
-            document.getElementById('statVpnSuccess').textContent = formatNumber(data.totals.success || 0);
-            document.getElementById('statVpnFailed').textContent = formatNumber(data.totals.failure || 0);
+            document.getElementById('statVpnSuccess').textContent = formatNumber(data.totals?.success || 0);
+            document.getElementById('statVpnFailed').textContent = formatNumber(data.totals?.failure || 0);
 
+            const usersOk = data.top_users_ok || [];
             const usersOkBox = document.getElementById('topVpnUsersOk');
-            if (!data.top_users_ok.length) {
+            if (!usersOk.length) {
                 usersOkBox.innerHTML = '<div class="empty">Sin actividad</div>';
             } else {
-                usersOkBox.innerHTML = data.top_users_ok.map(u => `
+                usersOkBox.innerHTML = usersOk.map(u => `
                     <div class="ip-row">
                         <div class="ip-info">
-                            <div><div class="ip-address">${u.username || '-'}</div></div>
+                            <div><div class="ip-address">${esc(u.username || '-')}</div></div>
                         </div>
                         <span class="ip-count">${formatNumber(u.count)}</span>
                     </div>`).join('');
             }
 
+            const ipsFailed = data.top_ips_failed || [];
             const ipsFailedBox = document.getElementById('topVpnIpsFailed');
-            if (!data.top_ips_failed.length) {
+            if (!ipsFailed.length) {
                 ipsFailedBox.innerHTML = '<div class="empty">Sin fallos</div>';
             } else {
-                const ips = data.top_ips_failed.map(i => i.ip);
+                const ips = ipsFailed.map(i => i.ip);
                 await getGeoInfoBatch(ips);
-                ipsFailedBox.innerHTML = data.top_ips_failed.map(item => {
+                ipsFailedBox.innerHTML = ipsFailed.map(item => {
                     const geo = geoCache[item.ip] || { flag: '', country: '' };
                     return `<div class="ip-row">
                         <div class="ip-info">
-                            <span class="ip-flag">${geo.flag}</span>
+                            <span class="ip-flag">${esc(geo.flag)}</span>
                             <div>
-                                <div class="ip-address">${item.ip}</div>
-                                <div class="ip-country">${geo.country}</div>
+                                <div class="ip-address">${esc(item.ip)}</div>
+                                <div class="ip-country">${esc(geo.country)}</div>
                             </div>
                         </div>
                         <span class="ip-count">${formatNumber(item.count)}</span>
@@ -619,8 +621,8 @@
                     <div class="ip-info">
                         <span class="badge badge-allow">OVPN</span>
                         <div>
-                            <div class="ip-address">${c.common_name}</div>
-                            <div class="ip-country">${c.real_address} &middot; ${formatBytes(c.bytes_recv)} ↓ / ${formatBytes(c.bytes_sent)} ↑</div>
+                            <div class="ip-address">${esc(c.common_name)}</div>
+                            <div class="ip-country">${esc(c.real_address)} &middot; ${formatBytes(c.bytes_recv)} ↓ / ${formatBytes(c.bytes_sent)} ↑</div>
                         </div>
                     </div>
                     <span class="ip-count">activo</span>
@@ -633,10 +635,10 @@
                 const transfer = `${formatBytes(p.bytes_recv)} ↓ / ${formatBytes(p.bytes_sent)} ↑`;
                 rows.push(`<div class="ip-row">
                     <div class="ip-info">
-                        <span class="badge ${badgeCls}">${p.interface.toUpperCase()}</span>
+                        <span class="badge ${badgeCls}">${esc(p.interface.toUpperCase())}</span>
                         <div>
-                            <div class="ip-address" title="${p.public_key}">${p.public_key.slice(0, 12)}…</div>
-                            <div class="ip-country">${p.endpoint || 'sin endpoint'} &middot; ${transfer} &middot; ${handshakeTxt}</div>
+                            <div class="ip-address" title="${esc(p.public_key)}">${esc(p.public_key.slice(0, 12))}…</div>
+                            <div class="ip-country">${esc(p.endpoint || 'sin endpoint')} &middot; ${transfer} &middot; ${handshakeTxt}</div>
                         </div>
                     </div>
                     <span class="ip-count ${active ? '' : 'warning'}">${active ? 'activo' : 'inactivo'}</span>
@@ -669,9 +671,9 @@
             box.innerHTML = byPort.slice(0, 10).map(item => `
                 <div class="ip-row">
                     <div class="ip-info">
-                        <span class="badge badge-block">${item.port}</span>
+                        <span class="badge badge-block">${esc(item.port)}</span>
                         <div>
-                            <div class="ip-address">${item.service || 'puerto ' + item.port}</div>
+                            <div class="ip-address">${esc(item.service || 'puerto ' + item.port)}</div>
                         </div>
                     </div>
                     <span class="ip-count">${formatNumber(item.count)}</span>

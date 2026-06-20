@@ -2,6 +2,42 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [2.11.0] - 2026-06-20
+
+### Corregido (auditoría de código)
+- **Scheduler a 1 worker + advisory lock.** Gunicorn pasa a `--workers 1
+  --threads 8` (la app es I/O-bound) y el scheduler toma un advisory lock antes de
+  ejecutar. Se elimina el doble scheduler que duplicaba datos.
+- **Purga de `vpn_events`.** Se añade purga periódica para evitar crecimiento
+  ilimitado de la tabla.
+- **Validación de `port_filter`.** Se valida la entrada antes de usarla.
+- **`/health` real contra la base de datos.** El endpoint ahora comprueba la
+  conexión a la DB en lugar de devolver siempre 200.
+- **Guarda de secretos por defecto.** Se rechazan los valores `change-me-in-production`
+  en producción.
+- **`MAX_CONTENT_LENGTH` en `/csp-report`.** Se limita el tamaño del cuerpo de los
+  reportes CSP.
+- **`check_auth` en tiempo constante.** Comparación de credenciales resistente a
+  ataques de temporización.
+- **Cabecera CSP.** Se añade Content-Security-Policy en las respuestas.
+- **Truncado de `common_name`.** Se acota la longitud del campo.
+- **Descarte de líneas con timestamp malformado** al parsear logs.
+- **`is_internal_ip` con `ipaddress` (+IPv6).** Detección de IPs internas robusta,
+  con soporte IPv6.
+- **Caché y manejo de 429 en geoip.** Se cachean lookups y se gestiona el rate
+  limit (429) del proveedor.
+- **Lectura de logs con memoria acotada (`deque`).** Se evita cargar ficheros
+  enteros en memoria.
+- **Unificación de timestamps a UTC.**
+- **Escape XSS en el frontend.**
+- **Null-checks** varios.
+
+### Pendiente (follow-up)
+- Deduplicación de los duplicados históricos generados por el doble scheduler.
+- Creación de unique indexes para prevenir duplicados a nivel de DB.
+- Offset-tracking en la lectura de logs (evitar reprocesar líneas ya leídas).
+- Migración de zona horaria de los datos históricos a UTC.
+
 ## [2.10.2] - 2026-06-19
 
 ### Corregido

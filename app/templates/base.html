@@ -477,6 +477,9 @@
             return num.toString();
         }
 
+        // Escapa datos del backend antes de interpolarlos en innerHTML o atributos (anti-XSS).
+        function esc(s){ return String(s==null?"":s).replace(/[&<>"\x27]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\x22":"&quot;","\x27":"&#39;"}[c])); }
+
         function countryCodeToFlag(countryCode) {
             if (!countryCode || countryCode.length !== 2) return '';
             const codePoints = countryCode.toUpperCase().split('').map(char => 127397 + char.charCodeAt());
@@ -520,11 +523,11 @@
             for (let i = 0; i < app.length; i++) hash = app.charCodeAt(i) + ((hash << 5) - hash);
             const hue = Math.abs(hash) % 360;
             const bg = `hsl(${hue}, 55%, 35%)`;
-            return `<span class="badge badge-app" style="background:${bg}">${app}</span>`;
+            return `<span class="badge badge-app" style="background:${bg}">${esc(app)}</span>`;
         }
 
         function getTypeBadge(type) {
-            return `<span class="badge badge-${type}">${type.replace('_', ' ')}</span>`;
+            return `<span class="badge badge-${esc(type)}">${esc(String(type).replace('_', ' '))}</span>`;
         }
 
         function getJailBadge(jail) {
@@ -532,25 +535,25 @@
                        jail.includes('badbots') ? 'badge-nginx-badbots' :
                        jail.includes('botsearch') ? 'badge-nginx-botsearch' :
                        jail === 'sshd' ? 'badge-sshd' : 'badge-jail';
-            return `<span class="badge ${cls}">${jail}</span>`;
+            return `<span class="badge ${cls}">${esc(jail)}</span>`;
         }
 
         function getEventBadge(eventType) {
             const cls = eventType === 'ban' ? 'badge-ban' :
                        eventType === 'unban' ? 'badge-unban' : 'badge-found';
-            return `<span class="badge ${cls}">${eventType}</span>`;
+            return `<span class="badge ${cls}">${esc(eventType)}</span>`;
         }
 
         function getUfwActionBadge(action) {
             const cls = action === 'BLOCK' ? 'badge-block' :
                        action === 'ALLOW' ? 'badge-allow' : 'badge-audit';
-            return `<span class="badge ${cls}">${action}</span>`;
+            return `<span class="badge ${cls}">${esc(action)}</span>`;
         }
 
         function getProtoBadge(proto) {
             const cls = proto === 'TCP' ? 'badge-tcp' :
                        proto === 'UDP' ? 'badge-udp' : 'badge-icmp';
-            return `<span class="badge ${cls}">${proto}</span>`;
+            return `<span class="badge ${cls}">${esc(proto)}</span>`;
         }
 
         function getPortService(port) {

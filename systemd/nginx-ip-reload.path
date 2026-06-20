@@ -3,7 +3,7 @@
 
 [Unit]
 Description=Watch Nginx IP Access Config for changes
-Documentation=https://github.com/your-repo/nginx-monitor
+Documentation=https://github.com/troigm/nginx-monitor
 
 [Path]
 PathModified=/etc/nginx/conf.d/ip_access.conf

@@ -127,7 +127,7 @@
             'scan': { cls: 'badge-audit', label: 'SCAN' }
         };
         const r = reasons[reason] || { cls: 'badge-audit', label: reason || 'SCAN' };
-        return `<span class="badge ${r.cls}">${r.label}</span>`;
+        return `<span class="badge ${r.cls}">${esc(r.label)}</span>`;
     }
 
     function sortData(data, field, direction, type) {
@@ -209,10 +209,10 @@
                 <tr>
                     <td class="mono">${formatDate(r.timestamp)}</td>
                     <td>${getUfwActionBadge(r.action)}</td>
-                    <td class="mono">${r.src_ip}</td>
+                    <td class="mono">${esc(r.src_ip)}</td>
                     <td>${getProtoBadge(r.proto)}</td>
-                    <td>${getPortService(r.dst_port)}</td>
-                    <td>${geo.flag} ${geo.country}</td>
+                    <td>${esc(getPortService(r.dst_port))}</td>
+                    <td>${esc(geo.flag)} ${esc(geo.country)}</td>
                 </tr>
             `;
         }).join('');
@@ -297,9 +297,9 @@
                 await getGeoInfoBatch(ips);
                 document.getElementById('topUfwBlocked').innerHTML = data.top_src_ips.map(item => {
                     const geo = geoCache[item.ip] || { flag: '', country: '' };
-                    const portInfo = item.main_port ? `:${item.main_port}` : '';
+                    const portInfo = item.main_port ? `:${esc(item.main_port)}` : '';
                     const timeStr = item.last_seen ? `<span class="ip-time">${formatTime(item.last_seen)}</span>` : '';
-                    return `<div class="ip-row"><div class="ip-info"><span class="ip-flag">${geo.flag}</span><div><div class="ip-address">${item.ip}${portInfo}</div><div class="ip-country">${geo.country}${timeStr}</div></div></div><div class="ip-badges">${getBlockReasonBadge(item.reason)}<span class="ip-count">${item.count}</span></div></div>`;
+                    return `<div class="ip-row"><div class="ip-info"><span class="ip-flag">${esc(geo.flag)}</span><div><div class="ip-address">${esc(item.ip)}${portInfo}</div><div class="ip-country">${esc(geo.country)}${timeStr}</div></div></div><div class="ip-badges">${getBlockReasonBadge(item.reason)}<span class="ip-count">${esc(item.count)}</span></div></div>`;
                 }).join('');
             } else {
                 document.getElementById('topUfwBlocked').innerHTML = '<div class="empty">Sin IPs bloqueadas</div>';
@@ -328,7 +328,7 @@
 
             // Populate port filter
             const ports = [...new Set(tableData.map(r => r.dst_port).filter(p => p))].sort((a, b) => a - b);
-            document.getElementById('filterUfwPort').innerHTML = '<option value="">Todos</option>' + ports.map(p => `<option value="${p}">${getPortService(p)}</option>`).join('');
+            document.getElementById('filterUfwPort').innerHTML = '<option value="">Todos</option>' + ports.map(p => `<option value="${esc(p)}">${esc(getPortService(p))}</option>`).join('');
 
             renderPagination(paginationState);
             applyTableFilters();

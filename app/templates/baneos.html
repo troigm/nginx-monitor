@@ -176,8 +176,8 @@
                     <td class="mono">${formatDate(r.timestamp)}</td>
                     <td>${getJailBadge(r.jail)}</td>
                     <td>${getEventBadge(r.event_type)}</td>
-                    <td class="mono">${r.ip}</td>
-                    <td>${geo.flag} ${geo.country}</td>
+                    <td class="mono">${esc(r.ip)}</td>
+                    <td>${esc(geo.flag)} ${esc(geo.country)}</td>
                 </tr>
             `;
         }).join('');
@@ -213,15 +213,16 @@
         try {
             const res = await apiFetch(`${basePath}/api/fail2ban-stats?${params}`);
             const data = await res.json();
-            document.getElementById('statF2bBans').textContent = formatNumber(data.totals.bans);
-            document.getElementById('statF2bFounds').textContent = formatNumber(data.totals.founds);
-            const limitReq = data.bans_by_jail.find(j => j.jail.includes('limit-req'))?.count || 0;
-            const badBots = data.bans_by_jail.find(j => j.jail.includes('badbots'))?.count || 0;
+            document.getElementById('statF2bBans').textContent = formatNumber(data.totals?.bans ?? 0);
+            document.getElementById('statF2bFounds').textContent = formatNumber(data.totals?.founds ?? 0);
+            const bansByJail = data.bans_by_jail || [];
+            const limitReq = bansByJail.find(j => j.jail.includes('limit-req'))?.count || 0;
+            const badBots = bansByJail.find(j => j.jail.includes('badbots'))?.count || 0;
             document.getElementById('statF2bLimitReq').textContent = formatNumber(limitReq);
             document.getElementById('statF2bBadBots').textContent = formatNumber(badBots);
 
-            charts.f2bByJail.data.labels = data.bans_by_jail.map(j => j.jail);
-            charts.f2bByJail.data.datasets[0].data = data.bans_by_jail.map(j => j.count);
+            charts.f2bByJail.data.labels = bansByJail.map(j => j.jail);
+            charts.f2bByJail.data.datasets[0].data = bansByJail.map(j => j.count);
             charts.f2bByJail.update();
 
             if (data.timeline && data.timeline.length > 0) {
@@ -239,7 +240,7 @@
                 document.getElementById('topF2bBanned').innerHTML = data.top_banned_ips.map(item => {
                     const geo = geoCache[item.ip] || { flag: '', country: '' };
                     const timeStr = item.last_seen ? `<span class="ip-time">${formatTime(item.last_seen)}</span>` : '';
-                    return `<div class="ip-row"><div class="ip-info"><span class="ip-flag">${geo.flag}</span><div><div class="ip-address">${item.ip}</div><div class="ip-country">${geo.country}${timeStr}</div></div></div><div class="ip-badges">${getJailBadge(item.jail)}<span class="ip-count">${item.count}</span></div></div>`;
+                    return `<div class="ip-row"><div class="ip-info"><span class="ip-flag">${esc(geo.flag)}</span><div><div class="ip-address">${esc(item.ip)}</div><div class="ip-country">${esc(geo.country)}${timeStr}</div></div></div><div class="ip-badges">${getJailBadge(item.jail)}<span class="ip-count">${esc(item.count)}</span></div></div>`;
                 }).join('');
             } else {
                 document.getElementById('topF2bBanned').innerHTML = '<div class="empty">Sin IPs baneadas</div>';
@@ -251,7 +252,7 @@
                 document.getElementById('topF2bFounds').innerHTML = data.top_found_ips.map(item => {
                     const geo = geoCache[item.ip] || { flag: '', country: '' };
                     const timeStr = item.last_seen ? `<span class="ip-time">${formatTime(item.last_seen)}</span>` : '';
-                    return `<div class="ip-row"><div class="ip-info"><span class="ip-flag">${geo.flag}</span><div><div class="ip-address">${item.ip}</div><div class="ip-country">${geo.country}${timeStr}</div></div></div><div class="ip-badges">${getJailBadge(item.jail)}<span class="ip-count warning">${item.count}</span></div></div>`;
+                    return `<div class="ip-row"><div class="ip-info"><span class="ip-flag">${esc(geo.flag)}</span><div><div class="ip-address">${esc(item.ip)}</div><div class="ip-country">${esc(geo.country)}${timeStr}</div></div></div><div class="ip-badges">${getJailBadge(item.jail)}<span class="ip-count warning">${esc(item.count)}</span></div></div>`;
                 }).join('');
             } else {
                 document.getElementById('topF2bFounds').innerHTML = '<div class="empty">Sin intentos detectados</div>';
@@ -274,7 +275,7 @@
                 totalRecords: response.pagination.total_records
             };
             const jails = [...new Set(tableData.fail2ban.map(r => r.jail))];
-            document.getElementById('filterF2bJail').innerHTML = '<option value="">Todas</option>' + jails.map(j => `<option value="${j}">${j}</option>`).join('');
+            document.getElementById('filterF2bJail').innerHTML = '<option value="">Todas</option>' + jails.map(j => `<option value="${esc(j)}">${esc(j)}</option>`).join('');
             renderPagination('fail2ban', paginationState.fail2ban);
             applyTableFilters('fail2ban');
         } catch (e) { console.error('Error loading fail2ban events:', e); }

@@ -459,6 +459,12 @@ curl -u admin:password -X POST "https://tu-dominio/nginx-monitor/api/cleanup?mon
   devuelven listas vacías.
 - **Página IP Lists no desplegada** (ver nota en Características): el código de
   `/ip-list` no está en el build actual.
+- **`scripts/manage-blacklist.sh` y `systemd/nginx-ip-reload.*` no desplegados.**
+  Ambos acompañan a la página IP Lists (no desplegada) y **no están instalados ni
+  en uso en este servidor**. El script no se ejecuta y las unidades
+  `nginx-ip-reload.path`/`.service` no están copiadas a `/etc/systemd/system/` ni
+  habilitadas. Se conservan en el repo como referencia para un despliegue futuro de
+  IP Lists.
 
 ## Desarrollo
 

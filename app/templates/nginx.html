@@ -295,11 +295,11 @@
         tbody.innerHTML = data.map(r => `
             <tr>
                 <td class="mono">${formatDate(r.timestamp)}</td>
-                <td><span class="badge badge-site">${r.site}</span></td>
+                <td><span class="badge badge-site">${esc(r.site)}</span></td>
                 <td>${getAppBadge(r.app)}</td>
-                <td><code>${r.violated_directive}</code></td>
-                <td class="truncate" title="${r.blocked_uri}">${r.blocked_uri}</td>
-                <td class="truncate" title="${r.document_uri}">${r.document_uri}</td>
+                <td><code>${esc(r.violated_directive)}</code></td>
+                <td class="truncate" title="${esc(r.blocked_uri)}">${esc(r.blocked_uri)}</td>
+                <td class="truncate" title="${esc(r.document_uri)}">${esc(r.document_uri)}</td>
             </tr>
         `).join('');
     }
@@ -313,13 +313,13 @@
         tbody.innerHTML = data.map(r => `
             <tr>
                 <td class="mono">${formatDate(r.timestamp)}</td>
-                <td><span class="badge badge-site">${r.site}</span></td>
+                <td><span class="badge badge-site">${esc(r.site)}</span></td>
                 <td>${getAppBadge(r.app)}</td>
                 <td>${getTypeBadge(r.log_type)}</td>
-                <td class="mono">${r.client_ip}</td>
-                <td class="truncate" title="${r.request_uri || ''}">${r.request_uri || '-'}</td>
-                <td>${r.status_code ? `<span class="badge badge-http_${r.status_code}">${r.status_code}</span>` : '-'}</td>
-                <td class="truncate" title="${r.user_agent || ''}">${r.user_agent || '-'}</td>
+                <td class="mono">${esc(r.client_ip)}</td>
+                <td class="truncate" title="${esc(r.request_uri || '')}">${esc(r.request_uri || '-')}</td>
+                <td>${r.status_code ? `<span class="badge badge-http_${esc(r.status_code)}">${esc(r.status_code)}</span>` : '-'}</td>
+                <td class="truncate" title="${esc(r.user_agent || '')}">${esc(r.user_agent || '-')}</td>
             </tr>
         `).join('');
     }
@@ -379,12 +379,13 @@
         try {
             const res = await apiFetch(`${basePath}/api/dashboard-stats?${params}`);
             const data = await res.json();
-            document.getElementById('statVisits').textContent = formatNumber(data.visits.total);
-            document.getElementById('statUniqueIps').textContent = formatNumber(data.visits.unique_ips);
-            document.getElementById('statCsp').textContent = formatNumber(data.errors.csp);
-            document.getElementById('statRateLimit').textContent = formatNumber(data.errors.rate_limit);
-            document.getElementById('statBadBots').textContent = formatNumber(data.errors.bad_bot);
-            document.getElementById('statErrors').textContent = formatNumber(data.errors.http_4xx + data.errors.http_5xx);
+            document.getElementById('statVisits').textContent = formatNumber(data.visits?.total ?? 0);
+            document.getElementById('statUniqueIps').textContent = formatNumber(data.visits?.unique_ips ?? 0);
+            const err = data.errors || {};
+            document.getElementById('statCsp').textContent = formatNumber(err.csp || 0);
+            document.getElementById('statRateLimit').textContent = formatNumber(err.rate_limit || 0);
+            document.getElementById('statBadBots').textContent = formatNumber(err.bad_bot || 0);
+            document.getElementById('statErrors').textContent = formatNumber((err.http_4xx || 0) + (err.http_5xx || 0));
 
             if (data.top_blocked_ips && data.top_blocked_ips.length > 0) {
                 const ips = data.top_blocked_ips.map(item => item.ip);
@@ -392,7 +393,7 @@
                 document.getElementById('topIps').innerHTML = data.top_blocked_ips.map(item => {
                     const geo = geoCache[item.ip] || { flag: '', country: '' };
                     const timeStr = item.last_seen ? `<span class="ip-time">${formatTime(item.last_seen)}</span>` : '';
-                    return `<div class="ip-row"><div class="ip-info"><span class="ip-flag">${geo.flag}</span><div><div class="ip-address">${item.ip}</div><div class="ip-country">${geo.country}${timeStr}</div></div></div><div class="ip-badges">${getTypeBadge(item.type)}<span class="ip-count">${item.count}</span></div></div>`;
+                    return `<div class="ip-row"><div class="ip-info"><span class="ip-flag">${esc(geo.flag)}</span><div><div class="ip-address">${esc(item.ip)}</div><div class="ip-country">${esc(geo.country)}${timeStr}</div></div></div><div class="ip-badges">${getTypeBadge(item.type)}<span class="ip-count">${esc(item.count)}</span></div></div>`;
                 }).join('');
             } else {
                 document.getElementById('topIps').innerHTML = '<div class="empty">Sin IPs bloqueadas</div>';
@@ -457,7 +458,7 @@
                 return `<div class="ip-row">
                     <div class="ip-info">
                         <div>
-                            <div class="ip-address" title="${item.uri}">${uri}</div>
+                            <div class="ip-address" title="${esc(item.uri)}">${esc(uri)}</div>
                         </div>
                     </div>
                     <span class="ip-count">${formatNumber(item.visits)}</span>
@@ -513,7 +514,7 @@
             } else {
                 regionsBox.innerHTML = '<div class="regions-es-title">Regiones de Espana</div>' +
                     sortedRegions.map(([r, v]) =>
-                        `<span class="region-chip">${r} <b>${formatNumber(v)}</b></span>`
+                        `<span class="region-chip">${esc(r)} <b>${formatNumber(v)}</b></span>`
                     ).join('');
             }
         } catch (e) {
@@ -538,8 +539,8 @@
             const directives = [...new Set(tableData.csp.map(r => r.violated_directive))];
             const siteSelect = document.getElementById('filterCspSite');
             const dirSelect = document.getElementById('filterCspDirective');
-            siteSelect.innerHTML = '<option value="">Todos</option>' + sites.map(s => `<option value="${s}">${s}</option>`).join('');
-            dirSelect.innerHTML = '<option value="">Todas</option>' + directives.map(d => `<option value="${d}">${d}</option>`).join('');
+            siteSelect.innerHTML = '<option value="">Todos</option>' + sites.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join('');
+            dirSelect.innerHTML = '<option value="">Todas</option>' + directives.map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
             renderPagination('csp', paginationState.csp);
             applyTableFilters('csp');
         } catch (e) { console.error('Error loading CSP reports:', e); }
@@ -561,8 +562,8 @@
             };
             const types = [...new Set(tableData.nginx.map(r => r.log_type))];
             const statuses = [...new Set(tableData.nginx.map(r => r.status_code).filter(s => s))];
-            document.getElementById('filterNginxType').innerHTML = '<option value="">Todos</option>' + types.map(t => `<option value="${t}">${t}</option>`).join('');
-            document.getElementById('filterNginxStatus').innerHTML = '<option value="">Todos</option>' + statuses.sort().map(s => `<option value="${s}">${s}</option>`).join('');
+            document.getElementById('filterNginxType').innerHTML = '<option value="">Todos</option>' + types.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
+            document.getElementById('filterNginxStatus').innerHTML = '<option value="">Todos</option>' + statuses.sort().map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join('');
             renderPagination('nginx', paginationState.nginx);
             applyTableFilters('nginx');
         } catch (e) { console.error('Error loading nginx logs:', e); }

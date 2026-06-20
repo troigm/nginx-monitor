@@ -6,7 +6,12 @@ Nginx & CSP Monitor - Dashboard para monitorear reportes CSP y errores de Nginx
 import os
 import re
 import json
-from datetime import datetime, timedelta
+import time
+import hmac
+import ipaddress
+from collections import deque
+from datetime import datetime, timedelta, timezone
+from dateutil import tz as _dateutil_tz
 from flask import Flask, request, jsonify, render_template, Response
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text
@@ -15,6 +20,9 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from functools import wraps
 
 app = Flask(__name__)
+
+# Limita el tamaño de cuerpos POST (p.ej. /csp-report) para evitar DoS por payload
+app.config['MAX_CONTENT_LENGTH'] = 64 * 1024
 
 # Database configuration - PostgreSQL or SQLite fallback
 DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:////data/monitor.db')
@@ -31,6 +39,16 @@ app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'change-me-in-production
 # Credenciales de acceso
 AUTH_USER = os.environ.get('AUTH_USER', 'admin')
 AUTH_PASS = os.environ.get('AUTH_PASS', 'change-me-in-production')
+
+# Zona horaria en la que el HOST escribe los logs sin offset (fail2ban).
+# El contenedor corre en UTC, asi que NO podemos confiar en la TZ del proceso:
+# fijamos explicitamente la del host para convertir esos timestamps a UTC.
+# Configurable por si el host cambia de zona; default Europe/Berlin (CET/CEST).
+LOG_LOCAL_TZ = _dateutil_tz.gettz(os.environ.get('LOG_LOCAL_TZ', 'Europe/Berlin')) or _dateutil_tz.UTC
+
+# No arrancar con secretos por defecto en producción
+if app.config['SECRET_KEY'] == 'change-me-in-production' or AUTH_PASS == 'change-me-in-production':
+    raise RuntimeError("Configura SECRET_KEY/AUTH_PASS; no arranques con el default")
 
 db = SQLAlchemy(app)
 
@@ -108,6 +126,15 @@ def set_security_headers(response):
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-XSS-Protection'] = '1; mode=block'
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "object-src 'none'; "
+        "base-uri 'self'; "
+        "frame-ancestors 'none'"
+    )
     if request.is_secure:
         response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
     return response
@@ -250,7 +277,9 @@ class VpnEvent(db.Model):
 # ==================== AUTENTICACIÓN ====================
 
 def check_auth(username, password):
-    return username == AUTH_USER and password == AUTH_PASS
+    user_ok = hmac.compare_digest((username or '').encode(), AUTH_USER.encode())
+    pass_ok = hmac.compare_digest((password or '').encode(), AUTH_PASS.encode())
+    return user_ok and pass_ok
 
 def authenticate():
     return Response(
@@ -308,10 +337,11 @@ def is_bot(user_agent):
     return any(bot in ua_lower for bot in BOT_PATTERNS)
 
 def is_internal_ip(ip):
-    """Detecta si es una IP interna"""
-    if ip in INTERNAL_IPS:
-        return True
-    return any(ip.startswith(prefix) for prefix in INTERNAL_IP_PREFIXES)
+    """Detecta si es una IP interna (privada/loopback), soporta IPv4 e IPv6"""
+    try:
+        return ipaddress.ip_address(ip).is_private
+    except ValueError:
+        return False
 
 def detect_app(uri, site=None):
     """Detecta la app basándose en el site (si mapeado) o en la URI"""
@@ -353,7 +383,9 @@ def parse_nginx_error_log(log_path='/var/log/nginx/error.log', last_lines=1000, 
 
     try:
         with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
-            lines = f.readlines()[-last_lines:]
+            lines = list(deque(f, maxlen=last_lines))
+        if len(lines) == last_lines:
+            app.logger.warning(f"{log_path}: superado maxlen={last_lines}, posible pérdida de líneas")
 
         for line in lines:
             for log_type, pattern in patterns.items():
@@ -362,8 +394,8 @@ def parse_nginx_error_log(log_path='/var/log/nginx/error.log', last_lines=1000, 
                     ts_str, client_ip, server, method, uri = match.groups()
                     try:
                         timestamp = datetime.strptime(ts_str, '%Y/%m/%d %H:%M:%S')
-                    except:
-                        timestamp = datetime.utcnow()
+                    except (ValueError, IndexError):
+                        continue
 
                     _site = site_override or detect_site(server)
                     entries.append({
@@ -397,7 +429,9 @@ def parse_nginx_access_log(log_path='/var/log/nginx/access.log', last_lines=5000
 
     try:
         with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
-            lines = f.readlines()[-last_lines:]
+            lines = list(deque(f, maxlen=last_lines))
+        if len(lines) == last_lines:
+            app.logger.warning(f"{log_path}: superado maxlen={last_lines}, posible pérdida de líneas")
 
         for line in lines:
             match = pattern.search(line)
@@ -419,9 +453,9 @@ def parse_nginx_access_log(log_path='/var/log/nginx/access.log', last_lines=5000
 
                 try:
                     timestamp = datetime.strptime(ts_str, '%d/%b/%Y:%H:%M:%S %z')
-                    timestamp = timestamp.replace(tzinfo=None)
-                except:
-                    timestamp = datetime.utcnow()
+                    timestamp = timestamp.astimezone(timezone.utc).replace(tzinfo=None)
+                except (ValueError, IndexError):
+                    continue
 
                 # Clasificar por status code
                 if status == 444:
@@ -467,7 +501,9 @@ def parse_visits_from_access_log(log_path='/var/log/nginx/access.log', last_line
 
     try:
         with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
-            lines = f.readlines()[-last_lines:]
+            lines = list(deque(f, maxlen=last_lines))
+        if len(lines) == last_lines:
+            app.logger.warning(f"{log_path}: superado maxlen={last_lines}, posible pérdida de líneas")
 
         for line in lines:
             match = pattern.search(line)
@@ -493,12 +529,13 @@ def parse_visits_from_access_log(log_path='/var/log/nginx/access.log', last_line
             if is_static_asset(uri):
                 continue
 
-            # Parsear timestamp
+            # Parsear timestamp (con offset) y convertir a UTC-naive antes de redondear
             try:
-                timestamp = datetime.strptime(ts_str.split()[0], '%d/%b/%Y:%H:%M:%S')
+                timestamp = datetime.strptime(ts_str, '%d/%b/%Y:%H:%M:%S %z')
+                timestamp = timestamp.astimezone(timezone.utc).replace(tzinfo=None)
                 # Redondear a la hora
                 hour_ts = timestamp.replace(minute=0, second=0, microsecond=0)
-            except:
+            except (ValueError, IndexError):
                 continue
 
             # Detectar site y app
@@ -605,7 +642,9 @@ def parse_fail2ban_log(log_path='/var/log/fail2ban.log', last_lines=2000):
 
     try:
         with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
-            lines = f.readlines()[-last_lines:]
+            lines = list(deque(f, maxlen=last_lines))
+        if len(lines) == last_lines:
+            app.logger.warning(f"{log_path}: superado maxlen={last_lines}, posible pérdida de líneas")
 
         for line in lines:
             for event_type, pattern in patterns.items():
@@ -613,9 +652,13 @@ def parse_fail2ban_log(log_path='/var/log/fail2ban.log', last_lines=2000):
                 if match:
                     ts_str, jail, ip = match.groups()
                     try:
+                        # fail2ban loggea en hora local del HOST sin offset. El
+                        # contenedor corre en UTC, asi que fijamos la zona del host
+                        # (LOG_LOCAL_TZ) explicitamente antes de convertir a UTC-naive.
                         timestamp = datetime.strptime(ts_str, '%Y-%m-%d %H:%M:%S')
-                    except:
-                        timestamp = datetime.utcnow()
+                        timestamp = timestamp.replace(tzinfo=LOG_LOCAL_TZ).astimezone(timezone.utc).replace(tzinfo=None)
+                    except (ValueError, IndexError):
+                        continue
 
                     entries.append({
                         'timestamp': timestamp,
@@ -670,13 +713,15 @@ def parse_ufw_log(log_path='/var/log/ufw.log', last_lines=3000):
     # Patron para log UFW formato systemd
     # 2026-01-22T11:01:59.215034+01:00 hostname kernel: [UFW BLOCK] IN=enp0s31f6 ... SRC=1.2.3.4 DST=5.6.7.8 ... PROTO=TCP SPT=12345 DPT=443
     pattern = re.compile(
-        r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.\d+\+\d{2}:\d{2}\s+\S+\s+kernel:\s+\[UFW\s+(\w+)\]\s+'
+        r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.\d+([+\-]\d{2}:\d{2})\s+\S+\s+kernel:\s+\[UFW\s+(\w+)\]\s+'
         r'IN=(\S*)\s+.*?SRC=([\d\.]+)\s+DST=([\d\.]+)\s+.*?PROTO=(\w+)(?:.*?SPT=(\d+))?(?:.*?DPT=(\d+))?'
     )
 
     try:
         with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
-            lines = f.readlines()[-last_lines:]
+            lines = list(deque(f, maxlen=last_lines))
+        if len(lines) == last_lines:
+            app.logger.warning(f"{log_path}: superado maxlen={last_lines}, posible pérdida de líneas")
 
         for line in lines:
             if '[UFW' not in line:
@@ -684,11 +729,12 @@ def parse_ufw_log(log_path='/var/log/ufw.log', last_lines=3000):
 
             match = pattern.search(line)
             if match:
-                ts_str, action, interface, src_ip, dst_ip, proto, src_port, dst_port = match.groups()
+                ts_str, ts_off, action, interface, src_ip, dst_ip, proto, src_port, dst_port = match.groups()
                 try:
-                    timestamp = datetime.strptime(ts_str, '%Y-%m-%dT%H:%M:%S')
-                except:
-                    timestamp = datetime.utcnow()
+                    timestamp = datetime.strptime(ts_str + ts_off, '%Y-%m-%dT%H:%M:%S%z')
+                    timestamp = timestamp.astimezone(timezone.utc).replace(tzinfo=None)
+                except (ValueError, IndexError):
+                    continue
 
                 entries.append({
                     'timestamp': timestamp,
@@ -747,37 +793,39 @@ def parse_auth_log(log_path='/var/log/auth.log', last_lines=3000):
     # Patrones para diferentes tipos de eventos SSH
     # Accepted publickey for user from IP port 12345 ssh2
     accepted_pattern = re.compile(
-        r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.\d+\+\d{2}:\d{2}\s+\S+\s+sshd\[\d+\]:\s+'
+        r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+[+\-]\d{2}:\d{2})\s+\S+\s+sshd\[\d+\]:\s+'
         r'Accepted\s+(\w+)\s+for\s+(\S+)\s+from\s+([\d\.]+)\s+port\s+(\d+)'
     )
 
     # Failed password for user from IP port 12345
     failed_pattern = re.compile(
-        r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.\d+\+\d{2}:\d{2}\s+\S+\s+sshd\[\d+\]:\s+'
+        r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+[+\-]\d{2}:\d{2})\s+\S+\s+sshd\[\d+\]:\s+'
         r'Failed\s+(\w+)\s+for\s+(?:invalid user\s+)?(\S+)\s+from\s+([\d\.]+)\s+port\s+(\d+)'
     )
 
     # Invalid user username from IP port 12345
     invalid_user_pattern = re.compile(
-        r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.\d+\+\d{2}:\d{2}\s+\S+\s+sshd\[\d+\]:\s+'
+        r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+[+\-]\d{2}:\d{2})\s+\S+\s+sshd\[\d+\]:\s+'
         r'Invalid user\s+(\S+)\s+from\s+([\d\.]+)\s+port\s+(\d+)'
     )
 
     # Connection closed by IP port (preauth) - intentos fallidos sin auth
     preauth_close_pattern = re.compile(
-        r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.\d+\+\d{2}:\d{2}\s+\S+\s+sshd\[\d+\]:\s+'
+        r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+[+\-]\d{2}:\d{2})\s+\S+\s+sshd\[\d+\]:\s+'
         r'Connection closed by\s+([\d\.]+)\s+port\s+(\d+)\s+\[preauth\]'
     )
 
     # banner exchange errors
     banner_error_pattern = re.compile(
-        r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.\d+\+\d{2}:\d{2}\s+\S+\s+sshd\[\d+\]:\s+'
+        r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+[+\-]\d{2}:\d{2})\s+\S+\s+sshd\[\d+\]:\s+'
         r'banner exchange:.*from\s+([\d\.]+)\s+port\s+(\d+)'
     )
 
     try:
         with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
-            lines = f.readlines()[-last_lines:]
+            lines = list(deque(f, maxlen=last_lines))
+        if len(lines) == last_lines:
+            app.logger.warning(f"{log_path}: superado maxlen={last_lines}, posible pérdida de líneas")
 
         for line in lines:
             if 'sshd[' not in line:
@@ -788,9 +836,10 @@ def parse_auth_log(log_path='/var/log/auth.log', last_lines=3000):
             if match:
                 ts_str, auth_method, username, src_ip, src_port = match.groups()
                 try:
-                    timestamp = datetime.strptime(ts_str, '%Y-%m-%dT%H:%M:%S')
-                except:
-                    timestamp = datetime.utcnow()
+                    timestamp = datetime.strptime(ts_str, '%Y-%m-%dT%H:%M:%S.%f%z')
+                    timestamp = timestamp.astimezone(timezone.utc).replace(tzinfo=None)
+                except (ValueError, IndexError):
+                    continue
                 entries.append({
                     'timestamp': timestamp,
                     'event_type': 'accepted',
@@ -807,9 +856,10 @@ def parse_auth_log(log_path='/var/log/auth.log', last_lines=3000):
             if match:
                 ts_str, auth_method, username, src_ip, src_port = match.groups()
                 try:
-                    timestamp = datetime.strptime(ts_str, '%Y-%m-%dT%H:%M:%S')
-                except:
-                    timestamp = datetime.utcnow()
+                    timestamp = datetime.strptime(ts_str, '%Y-%m-%dT%H:%M:%S.%f%z')
+                    timestamp = timestamp.astimezone(timezone.utc).replace(tzinfo=None)
+                except (ValueError, IndexError):
+                    continue
                 entries.append({
                     'timestamp': timestamp,
                     'event_type': 'failed',
@@ -826,9 +876,10 @@ def parse_auth_log(log_path='/var/log/auth.log', last_lines=3000):
             if match:
                 ts_str, username, src_ip, src_port = match.groups()
                 try:
-                    timestamp = datetime.strptime(ts_str, '%Y-%m-%dT%H:%M:%S')
-                except:
-                    timestamp = datetime.utcnow()
+                    timestamp = datetime.strptime(ts_str, '%Y-%m-%dT%H:%M:%S.%f%z')
+                    timestamp = timestamp.astimezone(timezone.utc).replace(tzinfo=None)
+                except (ValueError, IndexError):
+                    continue
                 entries.append({
                     'timestamp': timestamp,
                     'event_type': 'invalid_user',
@@ -845,9 +896,10 @@ def parse_auth_log(log_path='/var/log/auth.log', last_lines=3000):
             if match:
                 ts_str, src_ip, src_port = match.groups()
                 try:
-                    timestamp = datetime.strptime(ts_str, '%Y-%m-%dT%H:%M:%S')
-                except:
-                    timestamp = datetime.utcnow()
+                    timestamp = datetime.strptime(ts_str, '%Y-%m-%dT%H:%M:%S.%f%z')
+                    timestamp = timestamp.astimezone(timezone.utc).replace(tzinfo=None)
+                except (ValueError, IndexError):
+                    continue
                 entries.append({
                     'timestamp': timestamp,
                     'event_type': 'preauth_close',
@@ -864,9 +916,10 @@ def parse_auth_log(log_path='/var/log/auth.log', last_lines=3000):
             if match:
                 ts_str, src_ip, src_port = match.groups()
                 try:
-                    timestamp = datetime.strptime(ts_str, '%Y-%m-%dT%H:%M:%S')
-                except:
-                    timestamp = datetime.utcnow()
+                    timestamp = datetime.strptime(ts_str, '%Y-%m-%dT%H:%M:%S.%f%z')
+                    timestamp = timestamp.astimezone(timezone.utc).replace(tzinfo=None)
+                except (ValueError, IndexError):
+                    continue
                 entries.append({
                     'timestamp': timestamp,
                     'event_type': 'banner_error',
@@ -927,7 +980,7 @@ WG_DUMP_PATH = f'{VPN_DUMP_DIR}/wg-dump.txt'
 # journalctl --output=short-iso line format:
 #   2026-05-10T23:51:51+02:00 hostname ovpn-server[PID]: <msg>
 _OVPN_JOURNAL_LINE = re.compile(
-    r'^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})[+\-]\d{2}:\d{2}\s+'
+    r'^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+\-]\d{2}:\d{2})\s+'
     r'\S+\s+ovpn-server\[\d+\]:\s+(.*)$'
 )
 # Prefijo "CN/IP:PORT msg" presente en eventos por-cliente
@@ -975,7 +1028,8 @@ def parse_openvpn_journal(path=OPENVPN_JOURNAL_PATH):
                     continue
                 ts_str, msg = m.group(1), m.group(2)
                 try:
-                    timestamp = datetime.strptime(ts_str, '%Y-%m-%dT%H:%M:%S')
+                    timestamp = datetime.strptime(ts_str, '%Y-%m-%dT%H:%M:%S%z')
+                    timestamp = timestamp.astimezone(timezone.utc).replace(tzinfo=None)
                 except ValueError:
                     continue
                 event_type = _classify_openvpn_event(msg)
@@ -985,11 +1039,11 @@ def parse_openvpn_journal(path=OPENVPN_JOURNAL_PATH):
                 src_port = 0
                 client_m = _OVPN_CLIENT_PREFIX.match(msg)
                 if client_m:
-                    common_name = client_m.group(1)
+                    common_name = client_m.group(1)[:100]
                     src_ip = client_m.group(2)
                     src_port = int(client_m.group(3))
                     # En el setup tipico de easy-rsa, CN == username del cert
-                    username = common_name
+                    username = common_name[:100]
                 entries.append({
                     'timestamp': timestamp,
                     'service': 'openvpn',
@@ -1127,61 +1181,74 @@ def _get_site_cutoff(site):
 def sync_logs():
     """Sincroniza los logs de nginx a la base de datos"""
     with app.app_context():
-        total_entries = 0
-
-        # Cutoff para log por defecto (DEFAULT_SITE)
-        default_cutoff = _get_site_cutoff(DEFAULT_SITE)
-
-        # Parsear logs por defecto (actual + rotado)
-        for log_path in ['/var/log/nginx/error.log', '/var/log/nginx/error.log.1']:
-            for entry in parse_nginx_error_log(log_path=log_path):
-                if entry['timestamp'] > default_cutoff:
-                    db.session.add(NginxLog(**entry))
-                    total_entries += 1
-
-        for log_path in ['/var/log/nginx/access.log', '/var/log/nginx/access.log.1']:
-            for entry in parse_nginx_access_log(log_path=log_path):
-                if entry['timestamp'] > default_cutoff:
-                    db.session.add(NginxLog(**entry))
-                    total_entries += 1
-
-        # Parsear logs de cada vhost mapeado (cutoff por site)
-        for prefix, site in _get_all_log_files():
-            cutoff = _get_site_cutoff(site)
-
-            for error_path in _get_log_paths(prefix, 'error'):
-                for entry in parse_nginx_error_log(log_path=error_path, site_override=site):
-                    if entry['timestamp'] > cutoff:
-                        db.session.add(NginxLog(**entry))
-                        total_entries += 1
-
-            for access_path in _get_log_paths(prefix, 'access'):
-                for entry in parse_nginx_access_log(log_path=access_path, site_override=site):
-                    if entry['timestamp'] > cutoff:
-                        db.session.add(NginxLog(**entry))
-                        total_entries += 1
-
+        # Advisory lock: garantiza que no corran dos sync a la vez aunque haya
+        # varios procesos (gunicorn workers + thread inicial).
+        got = db.session.execute(
+            text("SELECT pg_try_advisory_lock(:k)"), {"k": 911001}
+        ).scalar()
+        if not got:
+            app.logger.info("sync_logs ya en curso, salto")
+            return
         try:
-            db.session.commit()
-            app.logger.info(f"Synced {total_entries} log entries from {len(MONITOR_LOG_MAP) + 1} sources")
-        except Exception as e:
-            db.session.rollback()
-            app.logger.error(f"Error syncing logs: {e}")
+            total_entries = 0
 
-        # Sincronizar visitas tambien
-        sync_visits_internal()
+            # Cutoff para log por defecto (DEFAULT_SITE)
+            default_cutoff = _get_site_cutoff(DEFAULT_SITE)
 
-        # Sincronizar fail2ban
-        sync_fail2ban_internal()
+            # Parsear logs por defecto (actual + rotado)
+            for log_path in ['/var/log/nginx/error.log', '/var/log/nginx/error.log.1']:
+                for entry in parse_nginx_error_log(log_path=log_path):
+                    if entry['timestamp'] > default_cutoff:
+                        db.session.add(NginxLog(**entry))
+                        total_entries += 1
 
-        # Sincronizar UFW
-        sync_ufw_internal()
+            for log_path in ['/var/log/nginx/access.log', '/var/log/nginx/access.log.1']:
+                for entry in parse_nginx_access_log(log_path=log_path):
+                    if entry['timestamp'] > default_cutoff:
+                        db.session.add(NginxLog(**entry))
+                        total_entries += 1
 
-        # Sincronizar SSH auth
-        sync_ssh_auth_internal()
+            # Parsear logs de cada vhost mapeado (cutoff por site)
+            for prefix, site in _get_all_log_files():
+                cutoff = _get_site_cutoff(site)
 
-        # Sincronizar VPN (OpenVPN journal; WireGuard se sirve on-the-fly)
-        sync_vpn_internal()
+                for error_path in _get_log_paths(prefix, 'error'):
+                    for entry in parse_nginx_error_log(log_path=error_path, site_override=site):
+                        if entry['timestamp'] > cutoff:
+                            db.session.add(NginxLog(**entry))
+                            total_entries += 1
+
+                for access_path in _get_log_paths(prefix, 'access'):
+                    for entry in parse_nginx_access_log(log_path=access_path, site_override=site):
+                        if entry['timestamp'] > cutoff:
+                            db.session.add(NginxLog(**entry))
+                            total_entries += 1
+
+            try:
+                db.session.commit()
+                app.logger.info(f"Synced {total_entries} log entries from {len(MONITOR_LOG_MAP) + 1} sources")
+            except Exception as e:
+                db.session.rollback()
+                app.logger.error(f"Error syncing logs: {e}")
+
+            # Sincronizar visitas tambien
+            sync_visits_internal()
+
+            # Sincronizar fail2ban
+            sync_fail2ban_internal()
+
+            # Sincronizar UFW
+            sync_ufw_internal()
+
+            # Sincronizar SSH auth
+            sync_ssh_auth_internal()
+
+            # Sincronizar VPN (OpenVPN journal; WireGuard se sirve on-the-fly)
+            sync_vpn_internal()
+        finally:
+            db.session.execute(
+                text("SELECT pg_advisory_unlock(:k)"), {"k": 911001}
+            )
 
 @app.context_processor
 def inject_config():
@@ -1194,7 +1261,11 @@ def csp_report():
     """Endpoint para recibir reportes CSP"""
     try:
         data = request.get_json(force=True)
+        if not isinstance(data, dict):
+            return jsonify({'error': 'invalid report'}), 400
         report = data.get('csp-report', data)
+        if not isinstance(report, dict):
+            return jsonify({'error': 'invalid report'}), 400
 
         # Detectar site y app
         document_uri = report.get('document-uri', '')
@@ -1610,10 +1681,15 @@ def api_visits_by_country():
     return jsonify([{'ip': ip, 'visits': v} for ip, v in results])
 
 
+# Cache en memoria de geoip por IP: {ip: (expires_epoch, record_dict)}.
+# Evita re-consultar ip-api.com en cada carga del dashboard (rate limit 45 req/min).
+_geo_cache = {}
+_GEO_CACHE_TTL = 24 * 3600  # 24h
+
 @app.route('/api/geoip', methods=['POST'])
 @requires_auth
 def api_geoip():
-    """Obtiene geolocalización de IPs via ip-api.com"""
+    """Obtiene geolocalización de IPs via ip-api.com (con caché en memoria)"""
     import urllib.request
     import urllib.error
 
@@ -1623,22 +1699,47 @@ def api_geoip():
     if not ips:
         return jsonify([])
 
+    now = time.time()
+    # Separar IPs ya cacheadas (vigentes) de las que hay que consultar
+    cached = {}
+    to_query = []
+    for ip in ips[:100]:
+        entry = _geo_cache.get(ip)
+        if entry and entry[0] > now:
+            cached[ip] = entry[1]
+        else:
+            to_query.append(ip)
+
     # ip-api.com batch endpoint (max 100 IPs).
     # Pedimos tambien regionName/region para poder desglosar visitas dentro
     # de Espana (ver /api/visits-by-country en el dashboard).
-    try:
-        req_data = json.dumps(ips[:100]).encode('utf-8')
-        req = urllib.request.Request(
-            'http://ip-api.com/batch?fields=query,status,country,countryCode,regionName,region',
-            data=req_data,
-            headers={'Content-Type': 'application/json'}
-        )
-        with urllib.request.urlopen(req, timeout=5) as response:
-            result = json.loads(response.read().decode('utf-8'))
-            return jsonify(result)
-    except Exception as e:
-        app.logger.error(f"Error fetching geoip: {e}")
-        return jsonify([])
+    if to_query:
+        try:
+            req_data = json.dumps(to_query).encode('utf-8')
+            req = urllib.request.Request(
+                'http://ip-api.com/batch?fields=query,status,country,countryCode,regionName,region',
+                data=req_data,
+                headers={'Content-Type': 'application/json'}
+            )
+            with urllib.request.urlopen(req, timeout=5) as response:
+                fresh = json.loads(response.read().decode('utf-8'))
+            for rec in fresh:
+                ip = rec.get('query')
+                if ip:
+                    _geo_cache[ip] = (now + _GEO_CACHE_TTL, rec)
+                    cached[ip] = rec
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                # Rate limit de ip-api: no es un error real, servimos lo cacheado
+                app.logger.warning("geoip: ip-api 429 (rate limit), sirviendo cache")
+            else:
+                app.logger.error(f"Error fetching geoip (HTTP {e.code}): {e}")
+        except Exception as e:
+            app.logger.error(f"Error fetching geoip: {e}")
+
+    # Devolver en el mismo orden de entrada, omitiendo las que no se pudieron resolver
+    result = [cached[ip] for ip in ips[:100] if ip in cached]
+    return jsonify(result)
 
 @app.route('/api/fail2ban-stats')
 @requires_auth
@@ -2000,7 +2101,7 @@ def api_ufw_events():
     hours = validate_int_param(request.args.get('hours'), 24, 1, 2160)
     action_filter = request.args.get('action')
     proto_filter = request.args.get('proto')
-    port_filter = request.args.get('port')
+    port_filter = validate_int_param(request.args.get('port'), None, 1, 65535)
     ip_filter = request.args.get('ip')
     limit = validate_int_param(request.args.get('limit'), 100, 1, 2000)
     page = validate_int_param(request.args.get('page'), 1, 1, 1000)
@@ -2012,8 +2113,8 @@ def api_ufw_events():
         query = query.filter(UfwEvent.action == action_filter)
     if proto_filter:
         query = query.filter(UfwEvent.proto == proto_filter)
-    if port_filter:
-        query = query.filter(UfwEvent.dst_port == int(port_filter))
+    if port_filter is not None:
+        query = query.filter(UfwEvent.dst_port == port_filter)
     if ip_filter:
         query = query.filter(UfwEvent.src_ip == ip_filter)
 
@@ -2509,7 +2610,14 @@ def baneos():
 
 @app.route('/health')
 def health():
-    """Health check"""
+    """Health check: comprueba conectividad con la BD"""
+    try:
+        db.session.execute(text("SELECT 1"))
+        db.session.rollback()
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f"Health check DB error: {e}")
+        return jsonify({'status': 'unhealthy'}), 503
     return jsonify({'status': 'healthy'})
 
 # ==================== LIMPIEZA DE DATOS ====================
@@ -2519,6 +2627,15 @@ def cleanup_old_data(months=3):
     cutoff = datetime.utcnow() - timedelta(days=months * 30)
     now = datetime.utcnow()
     results = {}
+
+    # Advisory lock: evita que dos cleanups corran a la vez (scheduler + manual
+    # via /api/cleanup, o varios procesos).
+    got = db.session.execute(
+        text("SELECT pg_try_advisory_lock(:k)"), {"k": 911002}
+    ).scalar()
+    if not got:
+        app.logger.info("cleanup ya en curso, salto")
+        return {}
 
     try:
         # Limpiar nginx_logs
@@ -2541,6 +2658,10 @@ def cleanup_old_data(months=3):
         count = SshAuthEvent.query.filter(SshAuthEvent.timestamp < cutoff).delete()
         results['ssh_auth_events'] = count
 
+        # Limpiar vpn_events
+        count = VpnEvent.query.filter(VpnEvent.timestamp < cutoff).delete()
+        results['vpn_events'] = count
+
         # Limpiar visit_stats
         count = VisitStats.query.filter(VisitStats.timestamp < cutoff).delete()
         results['visit_stats'] = count
@@ -2559,6 +2680,10 @@ def cleanup_old_data(months=3):
         db.session.rollback()
         app.logger.error(f"Error en cleanup: {e}")
         raise
+    finally:
+        db.session.execute(
+            text("SELECT pg_advisory_unlock(:k)"), {"k": 911002}
+        )
 
 def scheduled_cleanup():
     """Wrapper para ejecutar cleanup desde scheduler con app_context"""
